@@ -47,3 +47,14 @@ tmp/
 temp/
 *.tmp
 .eslintcache
+
+# AL / Business Central artifacts
+.alcache/
+.alpackages/
+.snapshots/
+.output/
+*.app
+rad.json
+*.g.xlf
+*.flf
+TestResults.xml
