@@ -3,11 +3,19 @@ import Student from '../models/Student.js'
 
 const router = Router()
 
+const phoneRegex = /^\d{10,15}$/
+const asTrimmedString = (value) =>
+  typeof value === 'string' ? value.trim() : ''
+
 const normalizeStudentInput = (payload = {}) => {
   return {
-    ...payload,
-    fatherName: payload.fatherName || payload.parentDetails || '',
-    fatherPhone: payload.fatherPhone || payload.parentPhone || '',
+    name: asTrimmedString(payload.name),
+    rollNo: asTrimmedString(payload.rollNo),
+    className: asTrimmedString(payload.className),
+    section: asTrimmedString(payload.section),
+    fatherName: asTrimmedString(payload.fatherName || payload.parentDetails),
+    studentPhone: asTrimmedString(payload.studentPhone),
+    fatherPhone: asTrimmedString(payload.fatherPhone || payload.parentPhone),
   }
 }
 
@@ -17,6 +25,23 @@ const normalizeStudentOutput = (student) => {
     fatherName: student.fatherName || student.parentDetails || '',
     fatherPhone: student.fatherPhone || student.parentPhone || '',
   }
+}
+
+const validateStudentInput = (student) => {
+  if (!student.name) return 'Name is required'
+  if (!student.rollNo) return 'Roll No is required'
+  if (!student.className) return 'Class is required'
+  if (!student.section) return 'Section is required'
+  if (!student.fatherName) return 'Father Name is required'
+  if (!student.studentPhone) return 'Student Phone is required'
+  if (!student.fatherPhone) return 'Father Phone is required'
+  if (!phoneRegex.test(student.studentPhone)) {
+    return 'Student Phone must be 10 to 15 digits'
+  }
+  if (!phoneRegex.test(student.fatherPhone)) {
+    return 'Father Phone must be 10 to 15 digits'
+  }
+  return null
 }
 
 router.get('/', async (_req, res) => {
@@ -30,7 +55,13 @@ router.get('/', async (_req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const student = await Student.create(normalizeStudentInput(req.body))
+    const normalizedStudent = normalizeStudentInput(req.body)
+    const validationError = validateStudentInput(normalizedStudent)
+    if (validationError) {
+      return res.status(400).json({ message: validationError })
+    }
+
+    const student = await Student.create(normalizedStudent)
     return res.status(201).json({ data: student })
   } catch (error) {
     if (error.code === 11000) {
@@ -42,9 +73,15 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
+    const normalizedStudent = normalizeStudentInput(req.body)
+    const validationError = validateStudentInput(normalizedStudent)
+    if (validationError) {
+      return res.status(400).json({ message: validationError })
+    }
+
     const student = await Student.findByIdAndUpdate(
       req.params.id,
-      normalizeStudentInput(req.body),
+      normalizedStudent,
       {
         new: true,
         runValidators: true,
