@@ -125,7 +125,8 @@ h2 {
   color: #3f4e66;
 }
 
-.field input {
+.field input,
+.field select {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid #ced6e3;
@@ -136,6 +137,7 @@ h2 {
 }
 
 .field input:focus,
+.field select:focus,
 .search-wrap input:focus {
   outline: 2px solid #78a7da;
   border-color: #78a7da;

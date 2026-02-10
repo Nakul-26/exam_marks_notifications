@@ -2,8 +2,10 @@ import cors from 'cors'
 import dotenv from 'dotenv'
 import express from 'express'
 import mongoose from 'mongoose'
+import classRoutes from './routes/classRoutes.js'
 import examRoutes from './routes/examRoutes.js'
 import studentRoutes from './routes/studentRoutes.js'
+import subjectRoutes from './routes/subjectRoutes.js'
 
 dotenv.config()
 
@@ -20,6 +22,8 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/students', studentRoutes)
 app.use('/api/exams', examRoutes)
+app.use('/api/subjects', subjectRoutes)
+app.use('/api/classes', classRoutes)
 
 const start = async () => {
   if (!mongoUri) {
