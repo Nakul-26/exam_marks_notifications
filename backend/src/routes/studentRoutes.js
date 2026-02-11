@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import ClassStudent from '../models/ClassStudent.js'
 import Student from '../models/Student.js'
 
 const router = Router()
@@ -11,8 +12,6 @@ const normalizeStudentInput = (payload = {}) => {
   return {
     name: asTrimmedString(payload.name),
     rollNo: asTrimmedString(payload.rollNo),
-    className: asTrimmedString(payload.className),
-    section: asTrimmedString(payload.section),
     fatherName: asTrimmedString(payload.fatherName || payload.parentDetails),
     studentPhone: asTrimmedString(payload.studentPhone),
     fatherPhone: asTrimmedString(payload.fatherPhone || payload.parentPhone),
@@ -30,8 +29,6 @@ const normalizeStudentOutput = (student) => {
 const validateStudentInput = (student) => {
   if (!student.name) return 'Name is required'
   if (!student.rollNo) return 'Roll No is required'
-  if (!student.className) return 'Class is required'
-  if (!student.section) return 'Section is required'
   if (!student.fatherName) return 'Father Name is required'
   if (!student.studentPhone) return 'Student Phone is required'
   if (!student.fatherPhone) return 'Father Phone is required'
@@ -108,6 +105,8 @@ router.delete('/:id', async (req, res) => {
     if (!student) {
       return res.status(404).json({ message: 'Student not found' })
     }
+
+    await ClassStudent.deleteMany({ student: student._id })
 
     return res.json({ message: 'Student deleted' })
   } catch (error) {

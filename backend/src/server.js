@@ -3,6 +3,8 @@ import dotenv from 'dotenv'
 import express from 'express'
 import mongoose from 'mongoose'
 import classRoutes from './routes/classRoutes.js'
+import classStudentRoutes from './routes/classStudentRoutes.js'
+import classSubjectRoutes from './routes/classSubjectRoutes.js'
 import examRoutes from './routes/examRoutes.js'
 import studentRoutes from './routes/studentRoutes.js'
 import subjectRoutes from './routes/subjectRoutes.js'
@@ -24,6 +26,8 @@ app.use('/api/students', studentRoutes)
 app.use('/api/exams', examRoutes)
 app.use('/api/subjects', subjectRoutes)
 app.use('/api/classes', classRoutes)
+app.use('/api/class-subjects', classSubjectRoutes)
+app.use('/api/class-students', classStudentRoutes)
 
 const start = async () => {
   if (!mongoUri) {

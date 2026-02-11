@@ -1,4 +1,6 @@
 import { Router } from 'express'
+import ClassSubject from '../models/ClassSubject.js'
+import ClassStudent from '../models/ClassStudent.js'
 import ClassModel from '../models/Class.js'
 
 const router = Router()
@@ -89,6 +91,17 @@ router.delete('/:id', async (req, res) => {
     if (!classRecord) {
       return res.status(404).json({ message: 'Class not found' })
     }
+
+    await Promise.all([
+      ClassSubject.deleteMany({
+        className: classRecord.className,
+        section: classRecord.section,
+      }),
+      ClassStudent.deleteMany({
+        className: classRecord.className,
+        section: classRecord.section,
+      }),
+    ])
 
     return res.json({ message: 'Class deleted' })
   } catch (_error) {

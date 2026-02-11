@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
+import ClassStudentManagementPage from './pages/ClassStudentManagementPage'
+import ClassSubjectManagementPage from './pages/ClassSubjectManagementPage'
+import SubjectManagementPage from './pages/SubjectManagementPage'
 
 type Student = {
   _id: string
   name: string
   rollNo: string
-  className: string
-  section: string
   fatherName: string
   studentPhone: string
   fatherPhone: string
@@ -18,30 +19,56 @@ type StudentFormState = Omit<Student, '_id'>
 type Exam = {
   _id: string
   name: string
-  className: string
-  section: string
-  subject: string
   examDate: string
   totalMarks: number
+  targets: {
+    className: string
+    section: string
+    subjects: string[]
+  }[]
 }
 
 type ExamFormState = {
   name: string
-  className: string
-  section: string
-  subject: string
   examDate: string
   totalMarks: string
+  targets: {
+    className: string
+    section: string
+    subjects: string[]
+  }[]
 }
 
 type Subject = {
   _id: string
   name: string
-  className: string
-  section: string
 }
 
 type SubjectFormState = Omit<Subject, '_id'>
+
+type ClassSubject = {
+  _id: string
+  className: string
+  section: string
+  subject: string
+}
+
+type ClassSubjectFormState = Omit<ClassSubject, '_id'>
+
+type ClassStudent = {
+  _id: string
+  className: string
+  section: string
+  student: string
+  studentName: string
+  studentRollNo: string
+}
+
+type ClassStudentFormState = {
+  className: string
+  section: string
+  student: string
+}
 
 type ClassRecord = {
   _id: string
@@ -54,8 +81,6 @@ type ClassFormState = Omit<ClassRecord, '_id'>
 const initialStudentFormState: StudentFormState = {
   name: '',
   rollNo: '',
-  className: '',
-  section: '',
   fatherName: '',
   studentPhone: '',
   fatherPhone: '',
@@ -63,17 +88,25 @@ const initialStudentFormState: StudentFormState = {
 
 const initialExamFormState: ExamFormState = {
   name: '',
-  className: '',
-  section: '',
-  subject: '',
   examDate: '',
   totalMarks: '',
+  targets: [],
 }
 
 const initialSubjectFormState: SubjectFormState = {
   name: '',
+}
+
+const initialClassSubjectFormState: ClassSubjectFormState = {
   className: '',
   section: '',
+  subject: '',
+}
+
+const initialClassStudentFormState: ClassStudentFormState = {
+  className: '',
+  section: '',
+  student: '',
 }
 
 const initialClassFormState: ClassFormState = {
@@ -85,14 +118,14 @@ const studentApiPath = '/api/students'
 const examApiPath = '/api/exams'
 const subjectApiPath = '/api/subjects'
 const classApiPath = '/api/classes'
+const classSubjectApiPath = '/api/class-subjects'
+const classStudentApiPath = '/api/class-students'
 const phoneRegex = /^\d{10,15}$/
 
 const normalizeStudentForm = (form: StudentFormState): StudentFormState => {
   return {
     name: form.name.trim(),
     rollNo: form.rollNo.trim(),
-    className: form.className.trim(),
-    section: form.section.trim(),
     fatherName: form.fatherName.trim(),
     studentPhone: form.studentPhone.trim(),
     fatherPhone: form.fatherPhone.trim(),
@@ -102,8 +135,6 @@ const normalizeStudentForm = (form: StudentFormState): StudentFormState => {
 const validateStudentForm = (form: StudentFormState): string | null => {
   if (!form.name) return 'Name is required'
   if (!form.rollNo) return 'Roll No is required'
-  if (!form.className) return 'Class is required'
-  if (!form.section) return 'Section is required'
   if (!form.fatherName) return 'Father Name is required'
   if (!form.studentPhone) return 'Student Phone is required'
   if (!form.fatherPhone) return 'Father Phone is required'
@@ -117,22 +148,47 @@ const validateStudentForm = (form: StudentFormState): string | null => {
 }
 
 const normalizeExamForm = (form: ExamFormState): ExamFormState => {
+  const normalizedTargets = form.targets
+    .map((target) => ({
+      className: target.className.trim(),
+      section: target.section.trim(),
+      subjects: target.subjects.map((subject) => subject.trim()).filter(Boolean),
+    }))
+    .filter((target) => target.className && target.section)
+
+  const dedupedTargets = []
+  const seenKeys = new Set<string>()
+  for (const target of normalizedTargets) {
+    const key = `${target.className.toLowerCase()}__${target.section.toLowerCase()}`
+    if (seenKeys.has(key)) {
+      continue
+    }
+    seenKeys.add(key)
+    dedupedTargets.push({
+      className: target.className,
+      section: target.section,
+      subjects: Array.from(new Set(target.subjects)).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    })
+  }
+
   return {
     name: form.name.trim(),
-    className: form.className.trim(),
-    section: form.section.trim(),
-    subject: form.subject.trim(),
     examDate: form.examDate,
     totalMarks: form.totalMarks.trim(),
+    targets: dedupedTargets,
   }
 }
 
 const validateExamForm = (form: ExamFormState): string | null => {
   if (!form.name) return 'Exam Name is required'
-  if (!form.subject) return 'Subject is required'
-  if (!form.className) return 'Class is required'
-  if (!form.section) return 'Section is required'
   if (!form.examDate) return 'Exam Date is required'
+  if (!form.targets.length) return 'Add at least one class and subject mapping'
+  for (const target of form.targets) {
+    if (!target.className || !target.section) return 'Class and section are required'
+    if (!target.subjects.length) return 'At least one subject is required per class'
+  }
 
   const examDate = new Date(form.examDate)
   if (Number.isNaN(examDate.getTime())) return 'Exam Date is invalid'
@@ -148,15 +204,45 @@ const validateExamForm = (form: ExamFormState): string | null => {
 const normalizeSubjectForm = (form: SubjectFormState): SubjectFormState => {
   return {
     name: form.name.trim(),
-    className: form.className.trim(),
-    section: form.section.trim(),
   }
 }
 
 const validateSubjectForm = (form: SubjectFormState): string | null => {
   if (!form.name) return 'Subject Name is required'
+  return null
+}
+
+const normalizeClassSubjectForm = (
+  form: ClassSubjectFormState,
+): ClassSubjectFormState => {
+  return {
+    className: form.className.trim(),
+    section: form.section.trim(),
+    subject: form.subject.trim(),
+  }
+}
+
+const validateClassSubjectForm = (form: ClassSubjectFormState): string | null => {
   if (!form.className) return 'Class is required'
   if (!form.section) return 'Section is required'
+  if (!form.subject) return 'Subject is required'
+  return null
+}
+
+const normalizeClassStudentForm = (
+  form: ClassStudentFormState,
+): ClassStudentFormState => {
+  return {
+    className: form.className.trim(),
+    section: form.section.trim(),
+    student: form.student.trim(),
+  }
+}
+
+const validateClassStudentForm = (form: ClassStudentFormState): string | null => {
+  if (!form.className) return 'Class is required'
+  if (!form.section) return 'Section is required'
+  if (!form.student) return 'Student is required'
   return null
 }
 
@@ -175,7 +261,12 @@ const validateClassForm = (form: ClassFormState): string | null => {
 
 function App() {
   const [activePage, setActivePage] = useState<
-    'students' | 'exams' | 'subjects' | 'classes'
+    | 'students'
+    | 'exams'
+    | 'subjects'
+    | 'classSubjects'
+    | 'classStudents'
+    | 'classes'
   >('students')
 
   const [students, setStudents] = useState<Student[]>([])
@@ -189,6 +280,8 @@ function App() {
 
   const [exams, setExams] = useState<Exam[]>([])
   const [examForm, setExamForm] = useState<ExamFormState>(initialExamFormState)
+  const [examTargetClassKey, setExamTargetClassKey] = useState('')
+  const [examTargetSubjects, setExamTargetSubjects] = useState<string[]>([])
   const [editingExamId, setEditingExamId] = useState<string | null>(null)
   const [examSearch, setExamSearch] = useState('')
   const [examLoading, setExamLoading] = useState(false)
@@ -202,6 +295,28 @@ function App() {
   const [subjectSearch, setSubjectSearch] = useState('')
   const [subjectLoading, setSubjectLoading] = useState(false)
   const [subjectSubmitting, setSubjectSubmitting] = useState(false)
+
+  const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([])
+  const [classSubjectForm, setClassSubjectForm] = useState<ClassSubjectFormState>(
+    initialClassSubjectFormState,
+  )
+  const [editingClassSubjectId, setEditingClassSubjectId] = useState<
+    string | null
+  >(null)
+  const [classSubjectSearch, setClassSubjectSearch] = useState('')
+  const [classSubjectLoading, setClassSubjectLoading] = useState(false)
+  const [classSubjectSubmitting, setClassSubjectSubmitting] = useState(false)
+
+  const [classStudents, setClassStudents] = useState<ClassStudent[]>([])
+  const [classStudentForm, setClassStudentForm] = useState<ClassStudentFormState>(
+    initialClassStudentFormState,
+  )
+  const [editingClassStudentId, setEditingClassStudentId] = useState<
+    string | null
+  >(null)
+  const [classStudentSearch, setClassStudentSearch] = useState('')
+  const [classStudentLoading, setClassStudentLoading] = useState(false)
+  const [classStudentSubmitting, setClassStudentSubmitting] = useState(false)
 
   const [classes, setClasses] = useState<ClassRecord[]>([])
   const [classForm, setClassForm] = useState<ClassFormState>(initialClassFormState)
@@ -221,6 +336,14 @@ function App() {
     () => Boolean(editingSubjectId),
     [editingSubjectId],
   )
+  const isEditingClassSubject = useMemo(
+    () => Boolean(editingClassSubjectId),
+    [editingClassSubjectId],
+  )
+  const isEditingClassStudent = useMemo(
+    () => Boolean(editingClassStudentId),
+    [editingClassStudentId],
+  )
   const isEditingClass = useMemo(() => Boolean(editingClassId), [editingClassId])
 
   const filteredStudents = useMemo(() => {
@@ -233,8 +356,6 @@ function App() {
       return (
         student.name.toLowerCase().includes(normalizedSearch) ||
         student.rollNo.toLowerCase().includes(normalizedSearch) ||
-        student.className.toLowerCase().includes(normalizedSearch) ||
-        student.section.toLowerCase().includes(normalizedSearch) ||
         student.fatherName.toLowerCase().includes(normalizedSearch) ||
         student.studentPhone.toLowerCase().includes(normalizedSearch) ||
         student.fatherPhone.toLowerCase().includes(normalizedSearch)
@@ -250,11 +371,13 @@ function App() {
 
     return exams.filter((exam) => {
       const formattedDate = new Date(exam.examDate).toLocaleDateString()
+      const targetSearchBlob = exam.targets
+        .map((target) => `${target.className} ${target.section} ${target.subjects.join(' ')}`)
+        .join(' ')
+        .toLowerCase()
       return (
         exam.name.toLowerCase().includes(normalizedSearch) ||
-        exam.subject.toLowerCase().includes(normalizedSearch) ||
-        exam.className.toLowerCase().includes(normalizedSearch) ||
-        exam.section.toLowerCase().includes(normalizedSearch) ||
+        targetSearchBlob.includes(normalizedSearch) ||
         formattedDate.toLowerCase().includes(normalizedSearch)
       )
     })
@@ -267,13 +390,24 @@ function App() {
     }
 
     return subjects.filter((subject) => {
-      return (
-        subject.name.toLowerCase().includes(normalizedSearch) ||
-        subject.className.toLowerCase().includes(normalizedSearch) ||
-        subject.section.toLowerCase().includes(normalizedSearch)
-      )
+      return subject.name.toLowerCase().includes(normalizedSearch)
     })
   }, [subjectSearch, subjects])
+
+  const filteredClassSubjects = useMemo(() => {
+    const normalizedSearch = classSubjectSearch.trim().toLowerCase()
+    if (!normalizedSearch) {
+      return classSubjects
+    }
+
+    return classSubjects.filter((classSubject) => {
+      return (
+        classSubject.className.toLowerCase().includes(normalizedSearch) ||
+        classSubject.section.toLowerCase().includes(normalizedSearch) ||
+        classSubject.subject.toLowerCase().includes(normalizedSearch)
+      )
+    })
+  }, [classSubjectSearch, classSubjects])
 
   const filteredClasses = useMemo(() => {
     const normalizedSearch = classSearch.trim().toLowerCase()
@@ -289,27 +423,38 @@ function App() {
     })
   }, [classSearch, classes])
 
-  const examSubjectOptions = useMemo(() => {
-    const normalizedClass = examForm.className.trim().toLowerCase()
-    const normalizedSection = examForm.section.trim().toLowerCase()
-
-    const scopedSubjects = subjects.filter((subject) => {
-      const classMatches = normalizedClass
-        ? subject.className.trim().toLowerCase() === normalizedClass
-        : true
-      const sectionMatches = normalizedSection
-        ? subject.section.trim().toLowerCase() === normalizedSection
-        : true
-      return classMatches && sectionMatches
-    })
-
-    const names = scopedSubjects.map((subject) => subject.name.trim()).filter(Boolean)
-    if (examForm.subject.trim()) {
-      names.push(examForm.subject.trim())
+  const filteredClassStudents = useMemo(() => {
+    const normalizedSearch = classStudentSearch.trim().toLowerCase()
+    if (!normalizedSearch) {
+      return classStudents
     }
 
+    return classStudents.filter((classStudent) => {
+      return (
+        classStudent.className.toLowerCase().includes(normalizedSearch) ||
+        classStudent.section.toLowerCase().includes(normalizedSearch) ||
+        classStudent.studentName.toLowerCase().includes(normalizedSearch) ||
+        classStudent.studentRollNo.toLowerCase().includes(normalizedSearch)
+      )
+    })
+  }, [classStudentSearch, classStudents])
+
+  const examTargetSubjectOptions = useMemo(() => {
+    const [className = '', section = ''] = examTargetClassKey.split('__')
+    if (!className || !section) {
+      return []
+    }
+
+    const names = classSubjects
+      .filter(
+        (classSubject) =>
+          classSubject.className === className && classSubject.section === section,
+      )
+      .map((classSubject) => classSubject.subject.trim())
+      .filter(Boolean)
+
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
-  }, [examForm.className, examForm.section, examForm.subject, subjects])
+  }, [classSubjects, examTargetClassKey])
 
   const loadStudents = async () => {
     try {
@@ -381,6 +526,48 @@ function App() {
     }
   }
 
+  const loadClassSubjects = async () => {
+    try {
+      setClassSubjectLoading(true)
+      setError('')
+
+      const response = await fetch(classSubjectApiPath)
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to load class-subject mappings')
+      }
+
+      setClassSubjects(payload.data || [])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setClassSubjectLoading(false)
+    }
+  }
+
+  const loadClassStudents = async () => {
+    try {
+      setClassStudentLoading(true)
+      setError('')
+
+      const response = await fetch(classStudentApiPath)
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to load class-student mappings')
+      }
+
+      setClassStudents(payload.data || [])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setClassStudentLoading(false)
+    }
+  }
+
   const loadClasses = async () => {
     try {
       setClassLoading(true)
@@ -403,7 +590,14 @@ function App() {
   }
 
   useEffect(() => {
-    void Promise.all([loadStudents(), loadExams(), loadSubjects(), loadClasses()])
+    void Promise.all([
+      loadStudents(),
+      loadExams(),
+      loadSubjects(),
+      loadClassSubjects(),
+      loadClassStudents(),
+      loadClasses(),
+    ])
   }, [])
 
   const resetStudentForm = () => {
@@ -413,6 +607,8 @@ function App() {
 
   const resetExamForm = () => {
     setExamForm(initialExamFormState)
+    setExamTargetClassKey('')
+    setExamTargetSubjects([])
     setEditingExamId(null)
   }
 
@@ -421,9 +617,67 @@ function App() {
     setEditingSubjectId(null)
   }
 
+  const resetClassSubjectForm = () => {
+    setClassSubjectForm(initialClassSubjectFormState)
+    setEditingClassSubjectId(null)
+  }
+
+  const resetClassStudentForm = () => {
+    setClassStudentForm(initialClassStudentFormState)
+    setEditingClassStudentId(null)
+  }
+
   const resetClassForm = () => {
     setClassForm(initialClassFormState)
     setEditingClassId(null)
+  }
+
+  const addOrUpdateExamTarget = () => {
+    const [className = '', section = ''] = examTargetClassKey.split('__')
+    if (!className || !section) {
+      setError('Select class and section for the exam mapping')
+      return
+    }
+    if (!examTargetSubjects.length) {
+      setError('Select at least one subject for the selected class')
+      return
+    }
+
+    setError('')
+    setExamForm((previousForm) => {
+      const nextTarget = {
+        className,
+        section,
+        subjects: Array.from(new Set(examTargetSubjects)).sort((a, b) =>
+          a.localeCompare(b),
+        ),
+      }
+
+      const key = `${className.toLowerCase()}__${section.toLowerCase()}`
+      const remainingTargets = previousForm.targets.filter((target) => {
+        const targetKey = `${target.className.toLowerCase()}__${target.section.toLowerCase()}`
+        return targetKey !== key
+      })
+
+      return {
+        ...previousForm,
+        targets: [...remainingTargets, nextTarget],
+      }
+    })
+    setExamTargetSubjects([])
+  }
+
+  const removeExamTarget = (className: string, section: string) => {
+    setExamForm((previousForm) => ({
+      ...previousForm,
+      targets: previousForm.targets.filter(
+        (target) =>
+          !(
+            target.className.toLowerCase() === className.toLowerCase() &&
+            target.section.toLowerCase() === section.toLowerCase()
+          ),
+      ),
+    }))
   }
 
   const handleStudentSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -577,12 +831,86 @@ function App() {
     }
   }
 
+  const handleClassSubjectSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    try {
+      setClassSubjectSubmitting(true)
+      setError('')
+      const normalizedClassSubjectForm = normalizeClassSubjectForm(classSubjectForm)
+      const validationError = validateClassSubjectForm(normalizedClassSubjectForm)
+      if (validationError) {
+        throw new Error(validationError)
+      }
+
+      const method = isEditingClassSubject ? 'PUT' : 'POST'
+      const url = isEditingClassSubject
+        ? `${classSubjectApiPath}/${editingClassSubjectId}`
+        : classSubjectApiPath
+
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(normalizedClassSubjectForm),
+      })
+
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to save mapping')
+      }
+
+      resetClassSubjectForm()
+      await loadClassSubjects()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setClassSubjectSubmitting(false)
+    }
+  }
+
+  const handleClassStudentSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    try {
+      setClassStudentSubmitting(true)
+      setError('')
+      const normalizedClassStudentForm = normalizeClassStudentForm(classStudentForm)
+      const validationError = validateClassStudentForm(normalizedClassStudentForm)
+      if (validationError) {
+        throw new Error(validationError)
+      }
+
+      const method = isEditingClassStudent ? 'PUT' : 'POST'
+      const url = isEditingClassStudent
+        ? `${classStudentApiPath}/${editingClassStudentId}`
+        : classStudentApiPath
+
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(normalizedClassStudentForm),
+      })
+
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to save mapping')
+      }
+
+      resetClassStudentForm()
+      await loadClassStudents()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setClassStudentSubmitting(false)
+    }
+  }
+
   const startStudentEdit = (student: Student) => {
     setStudentForm({
       name: student.name,
       rollNo: student.rollNo,
-      className: student.className,
-      section: student.section,
       fatherName: student.fatherName,
       studentPhone: student.studentPhone,
       fatherPhone: student.fatherPhone,
@@ -593,20 +921,18 @@ function App() {
   const startExamEdit = (exam: Exam) => {
     setExamForm({
       name: exam.name,
-      className: exam.className,
-      section: exam.section,
-      subject: exam.subject,
       examDate: exam.examDate.slice(0, 10),
       totalMarks: String(exam.totalMarks),
+      targets: exam.targets || [],
     })
+    setExamTargetClassKey('')
+    setExamTargetSubjects([])
     setEditingExamId(exam._id)
   }
 
   const startSubjectEdit = (subject: Subject) => {
     setSubjectForm({
       name: subject.name,
-      className: subject.className,
-      section: subject.section,
     })
     setEditingSubjectId(subject._id)
   }
@@ -617,6 +943,24 @@ function App() {
       section: classRecord.section,
     })
     setEditingClassId(classRecord._id)
+  }
+
+  const startClassSubjectEdit = (classSubject: ClassSubject) => {
+    setClassSubjectForm({
+      className: classSubject.className,
+      section: classSubject.section,
+      subject: classSubject.subject,
+    })
+    setEditingClassSubjectId(classSubject._id)
+  }
+
+  const startClassStudentEdit = (classStudent: ClassStudent) => {
+    setClassStudentForm({
+      className: classStudent.className,
+      section: classStudent.section,
+      student: classStudent.student,
+    })
+    setEditingClassStudentId(classStudent._id)
   }
 
   const handleStudentDelete = async (id: string) => {
@@ -637,7 +981,7 @@ function App() {
       if (editingStudentId === id) {
         resetStudentForm()
       }
-      await loadStudents()
+      await Promise.all([loadStudents(), loadClassStudents()])
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unexpected error'
       setError(message)
@@ -687,7 +1031,7 @@ function App() {
       if (editingSubjectId === id) {
         resetSubjectForm()
       }
-      await loadSubjects()
+      await Promise.all([loadSubjects(), loadClassSubjects()])
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unexpected error'
       setError(message)
@@ -712,7 +1056,61 @@ function App() {
       if (editingClassId === id) {
         resetClassForm()
       }
-      await loadClasses()
+      await Promise.all([loadClasses(), loadClassSubjects(), loadClassStudents()])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    }
+  }
+
+  const handleClassSubjectDelete = async (id: string) => {
+    const shouldDelete = window.confirm('Delete this mapping?')
+    if (!shouldDelete) {
+      return
+    }
+
+    try {
+      setError('')
+      const response = await fetch(`${classSubjectApiPath}/${id}`, {
+        method: 'DELETE',
+      })
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to delete mapping')
+      }
+
+      if (editingClassSubjectId === id) {
+        resetClassSubjectForm()
+      }
+      await loadClassSubjects()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    }
+  }
+
+  const handleClassStudentDelete = async (id: string) => {
+    const shouldDelete = window.confirm('Delete this mapping?')
+    if (!shouldDelete) {
+      return
+    }
+
+    try {
+      setError('')
+      const response = await fetch(`${classStudentApiPath}/${id}`, {
+        method: 'DELETE',
+      })
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to delete mapping')
+      }
+
+      if (editingClassStudentId === id) {
+        resetClassStudentForm()
+      }
+      await loadClassStudents()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unexpected error'
       setError(message)
@@ -731,15 +1129,23 @@ function App() {
                 ? 'Exam Management'
                 : activePage === 'subjects'
                   ? 'Subject Management'
+                  : activePage === 'classSubjects'
+                    ? 'Class Subject Mapping'
+                    : activePage === 'classStudents'
+                      ? 'Class Student Mapping'
                   : 'Class Management'}
           </h1>
           <p className="subtitle">
             {activePage === 'students'
-              ? 'Add, update, remove, and view student records.'
+              ? 'Add, update, remove, and view student records only.'
               : activePage === 'exams'
                 ? 'Add, edit, delete, and view all exams.'
                 : activePage === 'subjects'
-                  ? 'Create and manage subjects for each class and section.'
+                  ? 'Create and manage subjects only.'
+                  : activePage === 'classSubjects'
+                    ? 'Connect subjects to class-section combinations.'
+                    : activePage === 'classStudents'
+                      ? 'Connect students to class-section combinations.'
                   : 'Create and manage class-section combinations.'}
           </p>
         </div>
@@ -767,6 +1173,24 @@ function App() {
           </button>
           <button
             type="button"
+            className={
+              activePage === 'classSubjects' ? 'tab-button active' : 'tab-button'
+            }
+            onClick={() => setActivePage('classSubjects')}
+          >
+            Class Subjects
+          </button>
+          <button
+            type="button"
+            className={
+              activePage === 'classStudents' ? 'tab-button active' : 'tab-button'
+            }
+            onClick={() => setActivePage('classStudents')}
+          >
+            Class Students
+          </button>
+          <button
+            type="button"
             className={activePage === 'classes' ? 'tab-button active' : 'tab-button'}
             onClick={() => setActivePage('classes')}
           >
@@ -789,7 +1213,7 @@ function App() {
                 <label htmlFor="search-students">Search students</label>
                 <input
                   id="search-students"
-                  placeholder="Search by name, roll no, class, section..."
+                  placeholder="Search by name, roll no, phone..."
                   value={studentSearch}
                   onChange={(event) => setStudentSearch(event.target.value)}
                 />
@@ -818,28 +1242,6 @@ function App() {
                   value={studentForm.rollNo}
                   onChange={(event) =>
                     setStudentForm({ ...studentForm, rollNo: event.target.value })
-                  }
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>Class</span>
-                <input
-                  placeholder="e.g. 10"
-                  value={studentForm.className}
-                  onChange={(event) =>
-                    setStudentForm({ ...studentForm, className: event.target.value })
-                  }
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>Section</span>
-                <input
-                  placeholder="e.g. A"
-                  value={studentForm.section}
-                  onChange={(event) =>
-                    setStudentForm({ ...studentForm, section: event.target.value })
                   }
                   required
                 />
@@ -910,8 +1312,6 @@ function App() {
                   <tr>
                     <th>Name</th>
                     <th>Roll No</th>
-                    <th>Class</th>
-                    <th>Sec</th>
                     <th>Father Name</th>
                     <th>Student Phone</th>
                     <th>Father Phone</th>
@@ -923,8 +1323,6 @@ function App() {
                     <tr key={student._id}>
                       <td>{student.name}</td>
                       <td>{student.rollNo}</td>
-                      <td>{student.className}</td>
-                      <td>{student.section}</td>
                       <td>{student.fatherName}</td>
                       <td>{student.studentPhone}</td>
                       <td>{student.fatherPhone}</td>
@@ -946,7 +1344,7 @@ function App() {
                   ))}
                   {!filteredStudents.length && !studentLoading ? (
                     <tr>
-                      <td colSpan={8}>
+                      <td colSpan={6}>
                         {students.length
                           ? 'No students match your search.'
                           : 'No students found.'}
@@ -993,44 +1391,87 @@ function App() {
                 />
               </label>
               <label className="field">
-                <span>Subject</span>
+                <span>Class & Section</span>
                 <select
-                  value={examForm.subject}
-                  onChange={(event) =>
-                    setExamForm({ ...examForm, subject: event.target.value })
-                  }
-                  required
+                  value={examTargetClassKey}
+                  onChange={(event) => {
+                    setExamTargetClassKey(event.target.value)
+                    setExamTargetSubjects([])
+                  }}
                 >
-                  <option value="">Select subject</option>
-                  {examSubjectOptions.map((subjectName) => (
+                  <option value="">
+                    {classes.length ? 'Select class and section' : 'No classes available'}
+                  </option>
+                  {classes.map((classRecord) => {
+                    const optionValue = `${classRecord.className}__${classRecord.section}`
+                    return (
+                      <option key={classRecord._id} value={optionValue}>
+                        {classRecord.className} - {classRecord.section}
+                      </option>
+                    )
+                  })}
+                </select>
+              </label>
+              <label className="field field-full">
+                <span>Subjects For Selected Class</span>
+                <select
+                  multiple
+                  value={examTargetSubjects}
+                  onChange={(event) => {
+                    const selected = Array.from(event.target.selectedOptions).map(
+                      (option) => option.value,
+                    )
+                    setExamTargetSubjects(selected)
+                  }}
+                  size={Math.min(Math.max(examTargetSubjectOptions.length, 3), 8)}
+                >
+                  {examTargetSubjectOptions.map((subjectName) => (
                     <option key={subjectName} value={subjectName}>
                       {subjectName}
                     </option>
                   ))}
                 </select>
               </label>
-              <label className="field">
-                <span>Class</span>
-                <input
-                  placeholder="e.g. 10"
-                  value={examForm.className}
-                  onChange={(event) =>
-                    setExamForm({ ...examForm, className: event.target.value })
-                  }
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>Section</span>
-                <input
-                  placeholder="e.g. A"
-                  value={examForm.section}
-                  onChange={(event) =>
-                    setExamForm({ ...examForm, section: event.target.value })
-                  }
-                  required
-                />
-              </label>
+              <div className="actions">
+                <button type="button" className="secondary" onClick={addOrUpdateExamTarget}>
+                  Add/Update Class Subjects
+                </button>
+              </div>
+              <div className="table-wrap field-full">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Class</th>
+                      <th>Section</th>
+                      <th>Subjects</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {examForm.targets.map((target) => (
+                      <tr key={`${target.className}__${target.section}`}>
+                        <td>{target.className}</td>
+                        <td>{target.section}</td>
+                        <td>{target.subjects.join(', ')}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="danger"
+                            onClick={() => removeExamTarget(target.className, target.section)}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {!examForm.targets.length ? (
+                      <tr>
+                        <td colSpan={4}>No class-subject mappings added yet.</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
               <label className="field">
                 <span>Exam Date</span>
                 <input
@@ -1078,9 +1519,7 @@ function App() {
                 <thead>
                   <tr>
                     <th>Exam Name</th>
-                    <th>Subject</th>
-                    <th>Class</th>
-                    <th>Section</th>
+                    <th>Class/Section/Subjects</th>
                     <th>Exam Date</th>
                     <th>Total Marks</th>
                     <th>Actions</th>
@@ -1090,9 +1529,14 @@ function App() {
                   {filteredExams.map((exam) => (
                     <tr key={exam._id}>
                       <td>{exam.name}</td>
-                      <td>{exam.subject}</td>
-                      <td>{exam.className}</td>
-                      <td>{exam.section}</td>
+                      <td>
+                        {exam.targets
+                          .map(
+                            (target) =>
+                              `${target.className}-${target.section}: ${target.subjects.join(', ')}`,
+                          )
+                          .join(' | ')}
+                      </td>
                       <td>{new Date(exam.examDate).toLocaleDateString()}</td>
                       <td>{exam.totalMarks}</td>
                       <td>
@@ -1113,7 +1557,7 @@ function App() {
                   ))}
                   {!filteredExams.length && !examLoading ? (
                     <tr>
-                      <td colSpan={7}>
+                      <td colSpan={5}>
                         {exams.length ? 'No exams match your search.' : 'No exams found.'}
                       </td>
                     </tr>
@@ -1124,124 +1568,57 @@ function App() {
           </section>
         </>
       ) : activePage === 'subjects' ? (
-        <>
-          <section className="panel panel-compact">
-            <div className="stats-row">
-              <div className="stat-card">
-                <span>Total Subjects</span>
-                <strong>{subjects.length}</strong>
-              </div>
-              <div className="search-wrap">
-                <label htmlFor="search-subjects">Search subjects</label>
-                <input
-                  id="search-subjects"
-                  placeholder="Search by subject, class, section..."
-                  value={subjectSearch}
-                  onChange={(event) => setSubjectSearch(event.target.value)}
-                />
-              </div>
-            </div>
-          </section>
-
-          <section className="panel">
-            <h2>{isEditingSubject ? 'Edit Subject' : 'Add Subject'}</h2>
-            <form className="student-form" onSubmit={handleSubjectSubmit}>
-              <label className="field field-full">
-                <span>Subject Name</span>
-                <input
-                  placeholder="e.g. Mathematics"
-                  value={subjectForm.name}
-                  onChange={(event) =>
-                    setSubjectForm({ ...subjectForm, name: event.target.value })
-                  }
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>Class</span>
-                <input
-                  placeholder="e.g. 10"
-                  value={subjectForm.className}
-                  onChange={(event) =>
-                    setSubjectForm({ ...subjectForm, className: event.target.value })
-                  }
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>Section</span>
-                <input
-                  placeholder="e.g. A"
-                  value={subjectForm.section}
-                  onChange={(event) =>
-                    setSubjectForm({ ...subjectForm, section: event.target.value })
-                  }
-                  required
-                />
-              </label>
-
-              <div className="actions">
-                <button type="submit" className="primary" disabled={subjectSubmitting}>
-                  {subjectSubmitting ? 'Saving...' : isEditingSubject ? 'Update' : 'Add'}
-                </button>
-                {isEditingSubject ? (
-                  <button type="button" onClick={resetSubjectForm} className="secondary">
-                    Cancel
-                  </button>
-                ) : null}
-              </div>
-            </form>
-          </section>
-
-          <section className="panel">
-            <h2>All Subjects</h2>
-            {subjectLoading ? <p>Loading...</p> : null}
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Subject</th>
-                    <th>Class</th>
-                    <th>Section</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSubjects.map((subject) => (
-                    <tr key={subject._id}>
-                      <td>{subject.name}</td>
-                      <td>{subject.className}</td>
-                      <td>{subject.section}</td>
-                      <td>
-                        <div className="row-actions">
-                          <button type="button" onClick={() => startSubjectEdit(subject)}>
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="danger"
-                            onClick={() => void handleSubjectDelete(subject._id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!filteredSubjects.length && !subjectLoading ? (
-                    <tr>
-                      <td colSpan={4}>
-                        {subjects.length
-                          ? 'No subjects match your search.'
-                          : 'No subjects found.'}
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </>
+        <SubjectManagementPage
+          subjects={subjects}
+          subjectSearch={subjectSearch}
+          setSubjectSearch={setSubjectSearch}
+          isEditingSubject={isEditingSubject}
+          handleSubjectSubmit={handleSubjectSubmit}
+          subjectForm={subjectForm}
+          setSubjectForm={setSubjectForm}
+          subjectSubmitting={subjectSubmitting}
+          resetSubjectForm={resetSubjectForm}
+          subjectLoading={subjectLoading}
+          filteredSubjects={filteredSubjects}
+          startSubjectEdit={startSubjectEdit}
+          handleSubjectDelete={handleSubjectDelete}
+        />
+      ) : activePage === 'classSubjects' ? (
+        <ClassSubjectManagementPage
+          classSubjects={classSubjects}
+          classes={classes}
+          subjects={subjects}
+          classSubjectSearch={classSubjectSearch}
+          setClassSubjectSearch={setClassSubjectSearch}
+          isEditingClassSubject={isEditingClassSubject}
+          handleClassSubjectSubmit={handleClassSubjectSubmit}
+          classSubjectForm={classSubjectForm}
+          setClassSubjectForm={setClassSubjectForm}
+          classSubjectSubmitting={classSubjectSubmitting}
+          resetClassSubjectForm={resetClassSubjectForm}
+          classSubjectLoading={classSubjectLoading}
+          filteredClassSubjects={filteredClassSubjects}
+          startClassSubjectEdit={startClassSubjectEdit}
+          handleClassSubjectDelete={handleClassSubjectDelete}
+        />
+      ) : activePage === 'classStudents' ? (
+        <ClassStudentManagementPage
+          classStudents={classStudents}
+          classes={classes}
+          students={students}
+          classStudentSearch={classStudentSearch}
+          setClassStudentSearch={setClassStudentSearch}
+          isEditingClassStudent={isEditingClassStudent}
+          handleClassStudentSubmit={handleClassStudentSubmit}
+          classStudentForm={classStudentForm}
+          setClassStudentForm={setClassStudentForm}
+          classStudentSubmitting={classStudentSubmitting}
+          resetClassStudentForm={resetClassStudentForm}
+          classStudentLoading={classStudentLoading}
+          filteredClassStudents={filteredClassStudents}
+          startClassStudentEdit={startClassStudentEdit}
+          handleClassStudentDelete={handleClassStudentDelete}
+        />
       ) : (
         <>
           <section className="panel panel-compact">
