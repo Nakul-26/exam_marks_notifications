@@ -58,6 +58,7 @@ h2 {
   display: flex;
   gap: 0.9rem;
   align-items: end;
+  flex-wrap: wrap;
 }
 
 .stat-card {
@@ -85,6 +86,7 @@ h2 {
 
 .search-wrap {
   flex: 1;
+  min-width: 220px;
 }
 
 .search-wrap label {
@@ -104,6 +106,28 @@ h2 {
   border-radius: 10px;
   padding: 0.62rem 0.75rem;
   font-size: 0.95rem;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 150px;
+}
+
+.filter-field span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #3f4e66;
+}
+
+.filter-field select {
+  border: 1px solid #ced6e3;
+  border-radius: 10px;
+  padding: 0.62rem 0.75rem;
+  font-size: 0.95rem;
+  background: #ffffff;
 }
 
 .student-form {
@@ -247,6 +271,20 @@ tbody tr:hover {
   border-radius: 10px;
   padding: 0.7rem;
   margin-bottom: 1rem;
+}
+
+.exam-info-card {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+  border: 1px solid #e4e9f1;
+  background: #f7faff;
+  border-radius: 12px;
+  padding: 0.85rem;
+}
+
+.exam-info-card p {
+  margin: 0;
 }
 
 @media (max-width: 768px) {

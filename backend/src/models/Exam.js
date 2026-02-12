@@ -2,19 +2,23 @@ import mongoose from 'mongoose'
 
 const examSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, trim: true },
-    examDate: { type: Date, required: true },
-    totalMarks: { type: Number, required: true, min: 1 },
-    targets: [
-      {
-        className: { type: String, required: true, trim: true },
-        section: { type: String, required: true, trim: true },
-        subjects: [{ type: String, required: true, trim: true }],
-      },
-    ],
+    examName: { type: String, required: true, trim: true },
+    classId: { type: String, required: true, trim: true },
+    sectionId: { type: String, required: true, trim: true },
+    academicYear: { type: String, required: true, trim: true },
+    description: { type: String, trim: true, default: '' },
+    status: {
+      type: String,
+      enum: ['draft', 'published', 'completed'],
+      default: 'draft',
+      required: true,
+    },
   },
   { timestamps: true },
 )
+
+examSchema.index({ classId: 1, sectionId: 1, academicYear: 1 })
+examSchema.index({ examName: 1, classId: 1, sectionId: 1, academicYear: 1 }, { unique: true })
 
 const Exam = mongoose.model('Exam', examSchema)
 

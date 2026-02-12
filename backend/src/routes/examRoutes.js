@@ -1,127 +1,75 @@
 import { Router } from 'express'
-import ClassSubject from '../models/ClassSubject.js'
+import ClassModel from '../models/Class.js'
 import Exam from '../models/Exam.js'
+import ExamSubject from '../models/ExamSubject.js'
 
 const router = Router()
 
 const asTrimmedString = (value) =>
   typeof value === 'string' ? value.trim() : ''
 
+const normalizeStatus = (value) => {
+  const normalizedValue = asTrimmedString(value).toLowerCase()
+  return ['draft', 'published', 'completed'].includes(normalizedValue)
+    ? normalizedValue
+    : ''
+}
+
 const normalizeExamInput = (payload = {}) => {
-  const normalizedTargets = Array.isArray(payload.targets)
-    ? payload.targets
-        .map((target) => ({
-          className: asTrimmedString(target?.className),
-          section: asTrimmedString(target?.section),
-          subjects: Array.isArray(target?.subjects)
-            ? target.subjects.map((subject) => asTrimmedString(subject)).filter(Boolean)
-            : [],
-        }))
-        .filter((target) => target.className && target.section)
-    : []
-
-  const dedupedTargets = []
-  const targetKeySet = new Set()
-  for (const target of normalizedTargets) {
-    const subjectSet = new Set(target.subjects)
-    const normalizedSubjects = Array.from(subjectSet).sort((a, b) =>
-      a.localeCompare(b),
-    )
-    const key = `${target.className.toLowerCase()}__${target.section.toLowerCase()}`
-    if (targetKeySet.has(key)) {
-      continue
-    }
-    targetKeySet.add(key)
-    dedupedTargets.push({
-      className: target.className,
-      section: target.section,
-      subjects: normalizedSubjects,
-    })
-  }
-
+  const status = normalizeStatus(payload.status) || 'draft'
   return {
-    name: asTrimmedString(payload.name),
-    examDate: payload.examDate,
-    totalMarks: Number(payload.totalMarks),
-    targets: dedupedTargets,
+    examName: asTrimmedString(payload.examName),
+    classId: asTrimmedString(payload.classId),
+    sectionId: asTrimmedString(payload.sectionId),
+    academicYear: asTrimmedString(payload.academicYear),
+    description: asTrimmedString(payload.description),
+    status,
   }
 }
 
 const validateExamInput = (exam) => {
-  if (!exam.name) return 'Exam Name is required'
-  if (!exam.examDate) return 'Exam Date is required'
-  if (!Array.isArray(exam.targets) || !exam.targets.length) {
-    return 'At least one class and subject mapping is required'
+  if (!exam.examName) return 'Exam name is required'
+  if (!exam.classId) return 'Class is required'
+  if (!exam.sectionId) return 'Section is required'
+  if (!exam.academicYear) return 'Academic year is required'
+  if (!['draft', 'published', 'completed'].includes(exam.status)) {
+    return 'Status is invalid'
   }
+  return null
+}
 
-  for (const target of exam.targets) {
-    if (!target.className) return 'Class is required for each mapping'
-    if (!target.section) return 'Section is required for each mapping'
-    if (!Array.isArray(target.subjects) || !target.subjects.length) {
-      return 'At least one subject is required for each mapping'
-    }
-  }
+const validateClassExists = async (exam) => {
+  const classRecord = await ClassModel.findOne({
+    className: exam.classId,
+    section: exam.sectionId,
+  }).lean()
 
-  const examDate = new Date(exam.examDate)
-  if (Number.isNaN(examDate.getTime())) return 'Exam Date is invalid'
-
-  if (!Number.isFinite(exam.totalMarks)) return 'Total Marks must be a number'
-  if (!Number.isInteger(exam.totalMarks) || exam.totalMarks < 1) {
-    return 'Total Marks must be a whole number greater than 0'
+  if (!classRecord) {
+    return 'Selected class and section does not exist'
   }
 
   return null
 }
 
-const validateTargetsAgainstClassSubjects = async (targets) => {
-  for (const target of targets) {
-    const allowedSubjects = await ClassSubject.find({
-      className: target.className,
-      section: target.section,
-    })
-      .select('subject -_id')
-      .lean()
-
-    const allowedSet = new Set(
-      allowedSubjects.map((mapping) => asTrimmedString(mapping.subject)),
-    )
-    if (!allowedSet.size) {
-      return `No subjects mapped for Class ${target.className} Section ${target.section}`
-    }
-
-    for (const subject of target.subjects) {
-      if (!allowedSet.has(subject)) {
-        return `Subject "${subject}" is not mapped for Class ${target.className} Section ${target.section}`
-      }
-    }
-  }
-
-  return null
-}
-
-const normalizeExamOutput = (exam) => {
-  if (Array.isArray(exam.targets) && exam.targets.length) {
-    return exam
-  }
-
-  const className = asTrimmedString(exam.className)
-  const section = asTrimmedString(exam.section)
-  const subject = asTrimmedString(exam.subject)
-  const targets =
-    className && section && subject
-      ? [{ className, section, subjects: [subject] }]
-      : []
-
-  return {
-    ...exam,
-    targets,
-  }
-}
-
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const exams = await Exam.find().sort({ examDate: -1, createdAt: -1 }).lean()
-    return res.json({ data: exams.map(normalizeExamOutput) })
+    const query = {}
+    const classId = asTrimmedString(req.query.classId)
+    const sectionId = asTrimmedString(req.query.sectionId)
+    const academicYear = asTrimmedString(req.query.academicYear)
+    const status = normalizeStatus(req.query.status)
+    const search = asTrimmedString(req.query.search)
+
+    if (classId) query.classId = classId
+    if (sectionId) query.sectionId = sectionId
+    if (academicYear) query.academicYear = academicYear
+    if (status) query.status = status
+    if (search) {
+      query.examName = { $regex: search, $options: 'i' }
+    }
+
+    const exams = await Exam.find(query).sort({ createdAt: -1 }).lean()
+    return res.json({ data: exams })
   } catch (_error) {
     return res.status(500).json({ message: 'Failed to fetch exams' })
   }
@@ -135,16 +83,17 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: validationError })
     }
 
-    const targetValidationError = await validateTargetsAgainstClassSubjects(
-      normalizedExam.targets,
-    )
-    if (targetValidationError) {
-      return res.status(400).json({ message: targetValidationError })
+    const classValidationError = await validateClassExists(normalizedExam)
+    if (classValidationError) {
+      return res.status(400).json({ message: classValidationError })
     }
 
     const exam = await Exam.create(normalizedExam)
     return res.status(201).json({ data: exam })
-  } catch (_error) {
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'Exam already exists for this class and year' })
+    }
     return res.status(400).json({ message: 'Failed to create exam' })
   }
 })
@@ -157,11 +106,9 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ message: validationError })
     }
 
-    const targetValidationError = await validateTargetsAgainstClassSubjects(
-      normalizedExam.targets,
-    )
-    if (targetValidationError) {
-      return res.status(400).json({ message: targetValidationError })
+    const classValidationError = await validateClassExists(normalizedExam)
+    if (classValidationError) {
+      return res.status(400).json({ message: classValidationError })
     }
 
     const exam = await Exam.findByIdAndUpdate(req.params.id, normalizedExam, {
@@ -174,7 +121,10 @@ router.put('/:id', async (req, res) => {
     }
 
     return res.json({ data: exam })
-  } catch (_error) {
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'Exam already exists for this class and year' })
+    }
     return res.status(400).json({ message: 'Failed to update exam' })
   }
 })
@@ -187,6 +137,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Exam not found' })
     }
 
+    await ExamSubject.deleteMany({ examId: req.params.id })
     return res.json({ message: 'Exam deleted' })
   } catch (_error) {
     return res.status(400).json({ message: 'Failed to delete exam' })

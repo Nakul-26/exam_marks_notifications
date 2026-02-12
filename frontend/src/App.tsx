@@ -18,25 +18,40 @@ type StudentFormState = Omit<Student, '_id'>
 
 type Exam = {
   _id: string
-  name: string
-  examDate: string
-  totalMarks: number
-  targets: {
-    className: string
-    section: string
-    subjects: string[]
-  }[]
+  examName: string
+  classId: string
+  sectionId: string
+  academicYear: string
+  description: string
+  status: 'draft' | 'published' | 'completed'
+  createdAt: string
 }
 
 type ExamFormState = {
-  name: string
+  examName: string
+  classId: string
+  sectionId: string
+  academicYear: string
+  description: string
+  status: 'draft' | 'published' | 'completed'
+}
+
+type ExamSubject = {
+  _id: string
+  examId: string
+  subjectId: string
+  examDate: string
+  totalMarks: number
+  passingMarks: number
+  instructions: string
+}
+
+type ExamSubjectFormState = {
+  subjectId: string
   examDate: string
   totalMarks: string
-  targets: {
-    className: string
-    section: string
-    subjects: string[]
-  }[]
+  passingMarks: string
+  instructions: string
 }
 
 type Subject = {
@@ -87,10 +102,20 @@ const initialStudentFormState: StudentFormState = {
 }
 
 const initialExamFormState: ExamFormState = {
-  name: '',
+  examName: '',
+  classId: '',
+  sectionId: '',
+  academicYear: '',
+  description: '',
+  status: 'draft',
+}
+
+const initialExamSubjectFormState: ExamSubjectFormState = {
+  subjectId: '',
   examDate: '',
   totalMarks: '',
-  targets: [],
+  passingMarks: '',
+  instructions: '',
 }
 
 const initialSubjectFormState: SubjectFormState = {
@@ -116,6 +141,7 @@ const initialClassFormState: ClassFormState = {
 
 const studentApiPath = '/api/students'
 const examApiPath = '/api/exams'
+const examSubjectApiPath = '/api/exam-subjects'
 const subjectApiPath = '/api/subjects'
 const classApiPath = '/api/classes'
 const classSubjectApiPath = '/api/class-subjects'
@@ -148,55 +174,56 @@ const validateStudentForm = (form: StudentFormState): string | null => {
 }
 
 const normalizeExamForm = (form: ExamFormState): ExamFormState => {
-  const normalizedTargets = form.targets
-    .map((target) => ({
-      className: target.className.trim(),
-      section: target.section.trim(),
-      subjects: target.subjects.map((subject) => subject.trim()).filter(Boolean),
-    }))
-    .filter((target) => target.className && target.section)
-
-  const dedupedTargets = []
-  const seenKeys = new Set<string>()
-  for (const target of normalizedTargets) {
-    const key = `${target.className.toLowerCase()}__${target.section.toLowerCase()}`
-    if (seenKeys.has(key)) {
-      continue
-    }
-    seenKeys.add(key)
-    dedupedTargets.push({
-      className: target.className,
-      section: target.section,
-      subjects: Array.from(new Set(target.subjects)).sort((a, b) =>
-        a.localeCompare(b),
-      ),
-    })
-  }
-
   return {
-    name: form.name.trim(),
-    examDate: form.examDate,
-    totalMarks: form.totalMarks.trim(),
-    targets: dedupedTargets,
+    examName: form.examName.trim(),
+    classId: form.classId.trim(),
+    sectionId: form.sectionId.trim(),
+    academicYear: form.academicYear.trim(),
+    description: form.description.trim(),
+    status: form.status,
   }
 }
 
 const validateExamForm = (form: ExamFormState): string | null => {
-  if (!form.name) return 'Exam Name is required'
-  if (!form.examDate) return 'Exam Date is required'
-  if (!form.targets.length) return 'Add at least one class and subject mapping'
-  for (const target of form.targets) {
-    if (!target.className || !target.section) return 'Class and section are required'
-    if (!target.subjects.length) return 'At least one subject is required per class'
+  if (!form.examName) return 'Exam Name is required'
+  if (!form.classId) return 'Class is required'
+  if (!form.sectionId) return 'Section is required'
+  if (!form.academicYear) return 'Academic Year is required'
+  if (!['draft', 'published', 'completed'].includes(form.status)) {
+    return 'Status is invalid'
   }
+  return null
+}
 
-  const examDate = new Date(form.examDate)
-  if (Number.isNaN(examDate.getTime())) return 'Exam Date is invalid'
+const normalizeExamSubjectForm = (
+  form: ExamSubjectFormState,
+): ExamSubjectFormState => {
+  return {
+    subjectId: form.subjectId.trim(),
+    examDate: form.examDate,
+    totalMarks: form.totalMarks.trim(),
+    passingMarks: form.passingMarks.trim(),
+    instructions: form.instructions.trim(),
+  }
+}
+
+const validateExamSubjectForm = (form: ExamSubjectFormState): string | null => {
+  if (!form.subjectId) return 'Subject is required'
+  if (!form.examDate) return 'Exam Date is required'
 
   const totalMarks = Number(form.totalMarks)
-  if (!Number.isFinite(totalMarks)) return 'Total Marks must be a number'
+  if (!Number.isFinite(totalMarks)) return 'Maximum Marks must be a number'
   if (!Number.isInteger(totalMarks) || totalMarks < 1) {
-    return 'Total Marks must be a whole number greater than 0'
+    return 'Maximum Marks must be a whole number greater than 0'
+  }
+
+  const passingMarks = Number(form.passingMarks)
+  if (!Number.isFinite(passingMarks)) return 'Passing Marks must be a number'
+  if (!Number.isInteger(passingMarks) || passingMarks < 0) {
+    return 'Passing Marks must be a whole number 0 or greater'
+  }
+  if (passingMarks > totalMarks) {
+    return 'Passing Marks cannot be greater than Maximum Marks'
   }
   return null
 }
@@ -280,12 +307,26 @@ function App() {
 
   const [exams, setExams] = useState<Exam[]>([])
   const [examForm, setExamForm] = useState<ExamFormState>(initialExamFormState)
-  const [examTargetClassKey, setExamTargetClassKey] = useState('')
-  const [examTargetSubjects, setExamTargetSubjects] = useState<string[]>([])
+  const [examSubjects, setExamSubjects] = useState<ExamSubject[]>([])
+  const [examSubjectForm, setExamSubjectForm] = useState<ExamSubjectFormState>(
+    initialExamSubjectFormState,
+  )
+  const [examSubjectCountByExam, setExamSubjectCountByExam] = useState<
+    Record<string, number>
+  >({})
+  const [selectedExamId, setSelectedExamId] = useState<string | null>(null)
   const [editingExamId, setEditingExamId] = useState<string | null>(null)
+  const [editingExamSubjectId, setEditingExamSubjectId] = useState<string | null>(
+    null,
+  )
   const [examSearch, setExamSearch] = useState('')
+  const [examFilterClassKey, setExamFilterClassKey] = useState('')
+  const [examFilterYear, setExamFilterYear] = useState('')
+  const [examFilterStatus, setExamFilterStatus] = useState('')
   const [examLoading, setExamLoading] = useState(false)
   const [examSubmitting, setExamSubmitting] = useState(false)
+  const [examSubjectsLoading, setExamSubjectsLoading] = useState(false)
+  const [examSubjectSubmitting, setExamSubjectSubmitting] = useState(false)
 
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [subjectForm, setSubjectForm] = useState<SubjectFormState>(
@@ -332,6 +373,10 @@ function App() {
     [editingStudentId],
   )
   const isEditingExam = useMemo(() => Boolean(editingExamId), [editingExamId])
+  const isEditingExamSubject = useMemo(
+    () => Boolean(editingExamSubjectId),
+    [editingExamSubjectId],
+  )
   const isEditingSubject = useMemo(
     () => Boolean(editingSubjectId),
     [editingSubjectId],
@@ -365,23 +410,18 @@ function App() {
 
   const filteredExams = useMemo(() => {
     const normalizedSearch = examSearch.trim().toLowerCase()
-    if (!normalizedSearch) {
-      return exams
-    }
-
     return exams.filter((exam) => {
-      const formattedDate = new Date(exam.examDate).toLocaleDateString()
-      const targetSearchBlob = exam.targets
-        .map((target) => `${target.className} ${target.section} ${target.subjects.join(' ')}`)
-        .join(' ')
-        .toLowerCase()
-      return (
-        exam.name.toLowerCase().includes(normalizedSearch) ||
-        targetSearchBlob.includes(normalizedSearch) ||
-        formattedDate.toLowerCase().includes(normalizedSearch)
-      )
+      const classKey = `${exam.classId}__${exam.sectionId}`
+      const matchesClass = !examFilterClassKey || classKey === examFilterClassKey
+      const matchesYear = !examFilterYear || exam.academicYear === examFilterYear
+      const matchesStatus = !examFilterStatus || exam.status === examFilterStatus
+      const searchBlob =
+        `${exam.examName} ${exam.classId} ${exam.sectionId} ${exam.academicYear} ${exam.status}`.toLowerCase()
+      const matchesSearch = !normalizedSearch || searchBlob.includes(normalizedSearch)
+
+      return matchesClass && matchesYear && matchesStatus && matchesSearch
     })
-  }, [examSearch, exams])
+  }, [examFilterClassKey, examFilterStatus, examFilterYear, examSearch, exams])
 
   const filteredSubjects = useMemo(() => {
     const normalizedSearch = subjectSearch.trim().toLowerCase()
@@ -439,22 +479,32 @@ function App() {
     })
   }, [classStudentSearch, classStudents])
 
-  const examTargetSubjectOptions = useMemo(() => {
-    const [className = '', section = ''] = examTargetClassKey.split('__')
-    if (!className || !section) {
+  const selectedExam = useMemo(
+    () => exams.find((exam) => exam._id === selectedExamId) || null,
+    [exams, selectedExamId],
+  )
+
+  const examAcademicYearOptions = useMemo(() => {
+    const years = exams.map((exam) => exam.academicYear).filter(Boolean)
+    return Array.from(new Set(years)).sort((a, b) => a.localeCompare(b))
+  }, [exams])
+
+  const examSubjectOptions = useMemo(() => {
+    if (!selectedExam) {
       return []
     }
 
     const names = classSubjects
       .filter(
         (classSubject) =>
-          classSubject.className === className && classSubject.section === section,
+          classSubject.className === selectedExam.classId &&
+          classSubject.section === selectedExam.sectionId,
       )
       .map((classSubject) => classSubject.subject.trim())
       .filter(Boolean)
 
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
-  }, [classSubjects, examTargetClassKey])
+  }, [classSubjects, selectedExam])
 
   const loadStudents = async () => {
     try {
@@ -496,12 +546,65 @@ function App() {
         throw new Error(payload.message || 'Failed to load exams')
       }
 
-      setExams(payload.data || [])
+      const loadedExams = payload.data || []
+      setExams(loadedExams)
+      setSelectedExamId((previousExamId) => {
+        if (!loadedExams.length) {
+          return null
+        }
+        if (previousExamId && loadedExams.some((exam: Exam) => exam._id === previousExamId)) {
+          return previousExamId
+        }
+        return loadedExams[0]._id
+      })
+
+      const countEntries = await Promise.all(
+        loadedExams.map(async (exam: Exam) => {
+          try {
+            const countResponse = await fetch(`${examSubjectApiPath}/exam/${exam._id}`)
+            const countPayload = await countResponse.json()
+            if (!countResponse.ok) {
+              return [exam._id, 0]
+            }
+            const count = Array.isArray(countPayload.data) ? countPayload.data.length : 0
+            return [exam._id, count]
+          } catch (_error) {
+            return [exam._id, 0]
+          }
+        }),
+      )
+      setExamSubjectCountByExam(Object.fromEntries(countEntries))
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unexpected error'
       setError(message)
     } finally {
       setExamLoading(false)
+    }
+  }
+
+  const loadExamSubjects = async (examId: string) => {
+    try {
+      setExamSubjectsLoading(true)
+      setError('')
+
+      const response = await fetch(`${examSubjectApiPath}/exam/${examId}`)
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to load exam subjects')
+      }
+
+      const loadedExamSubjects = payload.data || []
+      setExamSubjects(loadedExamSubjects)
+      setExamSubjectCountByExam((previousCounts) => ({
+        ...previousCounts,
+        [examId]: loadedExamSubjects.length,
+      }))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setExamSubjectsLoading(false)
     }
   }
 
@@ -600,6 +703,14 @@ function App() {
     ])
   }, [])
 
+  useEffect(() => {
+    if (!selectedExamId) {
+      setExamSubjects([])
+      return
+    }
+    void loadExamSubjects(selectedExamId)
+  }, [selectedExamId])
+
   const resetStudentForm = () => {
     setStudentForm(initialStudentFormState)
     setEditingStudentId(null)
@@ -607,9 +718,12 @@ function App() {
 
   const resetExamForm = () => {
     setExamForm(initialExamFormState)
-    setExamTargetClassKey('')
-    setExamTargetSubjects([])
     setEditingExamId(null)
+  }
+
+  const resetExamSubjectForm = () => {
+    setExamSubjectForm(initialExamSubjectFormState)
+    setEditingExamSubjectId(null)
   }
 
   const resetSubjectForm = () => {
@@ -630,54 +744,6 @@ function App() {
   const resetClassForm = () => {
     setClassForm(initialClassFormState)
     setEditingClassId(null)
-  }
-
-  const addOrUpdateExamTarget = () => {
-    const [className = '', section = ''] = examTargetClassKey.split('__')
-    if (!className || !section) {
-      setError('Select class and section for the exam mapping')
-      return
-    }
-    if (!examTargetSubjects.length) {
-      setError('Select at least one subject for the selected class')
-      return
-    }
-
-    setError('')
-    setExamForm((previousForm) => {
-      const nextTarget = {
-        className,
-        section,
-        subjects: Array.from(new Set(examTargetSubjects)).sort((a, b) =>
-          a.localeCompare(b),
-        ),
-      }
-
-      const key = `${className.toLowerCase()}__${section.toLowerCase()}`
-      const remainingTargets = previousForm.targets.filter((target) => {
-        const targetKey = `${target.className.toLowerCase()}__${target.section.toLowerCase()}`
-        return targetKey !== key
-      })
-
-      return {
-        ...previousForm,
-        targets: [...remainingTargets, nextTarget],
-      }
-    })
-    setExamTargetSubjects([])
-  }
-
-  const removeExamTarget = (className: string, section: string) => {
-    setExamForm((previousForm) => ({
-      ...previousForm,
-      targets: previousForm.targets.filter(
-        (target) =>
-          !(
-            target.className.toLowerCase() === className.toLowerCase() &&
-            target.section.toLowerCase() === section.toLowerCase()
-          ),
-      ),
-    }))
   }
 
   const handleStudentSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -736,10 +802,7 @@ function App() {
       const response = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...normalizedExamForm,
-          totalMarks: Number(normalizedExamForm.totalMarks),
-        }),
+        body: JSON.stringify(normalizedExamForm),
       })
 
       const payload = await response.json()
@@ -754,6 +817,53 @@ function App() {
       setError(message)
     } finally {
       setExamSubmitting(false)
+    }
+  }
+
+  const handleExamSubjectSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selectedExamId) {
+      setError('Select an exam first to manage subjects')
+      return
+    }
+
+    try {
+      setExamSubjectSubmitting(true)
+      setError('')
+      const normalizedExamSubjectForm = normalizeExamSubjectForm(examSubjectForm)
+      const validationError = validateExamSubjectForm(normalizedExamSubjectForm)
+      if (validationError) {
+        throw new Error(validationError)
+      }
+
+      const method = isEditingExamSubject ? 'PUT' : 'POST'
+      const url = isEditingExamSubject
+        ? `${examSubjectApiPath}/${editingExamSubjectId}`
+        : examSubjectApiPath
+
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          examId: selectedExamId,
+          ...normalizedExamSubjectForm,
+          totalMarks: Number(normalizedExamSubjectForm.totalMarks),
+          passingMarks: Number(normalizedExamSubjectForm.passingMarks),
+        }),
+      })
+
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to save exam subject')
+      }
+
+      resetExamSubjectForm()
+      await loadExamSubjects(selectedExamId)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setExamSubjectSubmitting(false)
     }
   }
 
@@ -920,14 +1030,25 @@ function App() {
 
   const startExamEdit = (exam: Exam) => {
     setExamForm({
-      name: exam.name,
-      examDate: exam.examDate.slice(0, 10),
-      totalMarks: String(exam.totalMarks),
-      targets: exam.targets || [],
+      examName: exam.examName,
+      classId: exam.classId,
+      sectionId: exam.sectionId,
+      academicYear: exam.academicYear,
+      description: exam.description || '',
+      status: exam.status,
     })
-    setExamTargetClassKey('')
-    setExamTargetSubjects([])
     setEditingExamId(exam._id)
+  }
+
+  const startExamSubjectEdit = (examSubject: ExamSubject) => {
+    setExamSubjectForm({
+      subjectId: examSubject.subjectId,
+      examDate: examSubject.examDate.slice(0, 10),
+      totalMarks: String(examSubject.totalMarks),
+      passingMarks: String(examSubject.passingMarks),
+      instructions: examSubject.instructions || '',
+    })
+    setEditingExamSubjectId(examSubject._id)
   }
 
   const startSubjectEdit = (subject: Subject) => {
@@ -1006,7 +1127,40 @@ function App() {
       if (editingExamId === id) {
         resetExamForm()
       }
+      if (selectedExamId === id) {
+        setSelectedExamId(null)
+        resetExamSubjectForm()
+      }
       await loadExams()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    }
+  }
+
+  const handleExamSubjectDelete = async (id: string) => {
+    const shouldDelete = window.confirm('Delete this exam subject?')
+    if (!shouldDelete) {
+      return
+    }
+    if (!selectedExamId) {
+      setError('Select an exam first to manage subjects')
+      return
+    }
+
+    try {
+      setError('')
+      const response = await fetch(`${examSubjectApiPath}/${id}`, { method: 'DELETE' })
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to delete exam subject')
+      }
+
+      if (editingExamSubjectId === id) {
+        resetExamSubjectForm()
+      }
+      await loadExamSubjects(selectedExamId)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unexpected error'
       setError(message)
@@ -1368,40 +1522,18 @@ function App() {
                 <label htmlFor="search-exams">Search exams</label>
                 <input
                   id="search-exams"
-                  placeholder="Search by exam, class, section, subject..."
+                  placeholder="Search by exam name, class, year, status..."
                   value={examSearch}
                   onChange={(event) => setExamSearch(event.target.value)}
                 />
               </div>
-            </div>
-          </section>
-
-          <section className="panel">
-            <h2>{isEditingExam ? 'Edit Exam' : 'Add Exam'}</h2>
-            <form className="student-form" onSubmit={handleExamSubmit}>
-              <label className="field field-full">
-                <span>Exam Name</span>
-                <input
-                  placeholder="e.g. Mid Term"
-                  value={examForm.name}
-                  onChange={(event) =>
-                    setExamForm({ ...examForm, name: event.target.value })
-                  }
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>Class & Section</span>
+              <label className="filter-field">
+                <span>Filter Class</span>
                 <select
-                  value={examTargetClassKey}
-                  onChange={(event) => {
-                    setExamTargetClassKey(event.target.value)
-                    setExamTargetSubjects([])
-                  }}
+                  value={examFilterClassKey}
+                  onChange={(event) => setExamFilterClassKey(event.target.value)}
                 >
-                  <option value="">
-                    {classes.length ? 'Select class and section' : 'No classes available'}
-                  </option>
+                  <option value="">All Classes</option>
                   {classes.map((classRecord) => {
                     const optionValue = `${classRecord.className}__${classRecord.section}`
                     return (
@@ -1412,89 +1544,133 @@ function App() {
                   })}
                 </select>
               </label>
-              <label className="field field-full">
-                <span>Subjects For Selected Class</span>
+              <label className="filter-field">
+                <span>Filter Year</span>
                 <select
-                  multiple
-                  value={examTargetSubjects}
-                  onChange={(event) => {
-                    const selected = Array.from(event.target.selectedOptions).map(
-                      (option) => option.value,
-                    )
-                    setExamTargetSubjects(selected)
-                  }}
-                  size={Math.min(Math.max(examTargetSubjectOptions.length, 3), 8)}
+                  value={examFilterYear}
+                  onChange={(event) => setExamFilterYear(event.target.value)}
                 >
-                  {examTargetSubjectOptions.map((subjectName) => (
-                    <option key={subjectName} value={subjectName}>
-                      {subjectName}
+                  <option value="">All Years</option>
+                  {examAcademicYearOptions.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
                     </option>
                   ))}
                 </select>
               </label>
-              <div className="actions">
-                <button type="button" className="secondary" onClick={addOrUpdateExamTarget}>
-                  Add/Update Class Subjects
-                </button>
-              </div>
-              <div className="table-wrap field-full">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Class</th>
-                      <th>Section</th>
-                      <th>Subjects</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {examForm.targets.map((target) => (
-                      <tr key={`${target.className}__${target.section}`}>
-                        <td>{target.className}</td>
-                        <td>{target.section}</td>
-                        <td>{target.subjects.join(', ')}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="danger"
-                            onClick={() => removeExamTarget(target.className, target.section)}
-                          >
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {!examForm.targets.length ? (
-                      <tr>
-                        <td colSpan={4}>No class-subject mappings added yet.</td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-              <label className="field">
-                <span>Exam Date</span>
+              <label className="filter-field">
+                <span>Filter Status</span>
+                <select
+                  value={examFilterStatus}
+                  onChange={(event) => setExamFilterStatus(event.target.value)}
+                >
+                  <option value="">All Status</option>
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section className="panel">
+            <h2>{isEditingExam ? 'Edit Exam' : 'Add Exam'}</h2>
+            <form className="student-form" onSubmit={handleExamSubmit}>
+              <label className="field field-full">
+                <span>Exam Name</span>
                 <input
-                  type="date"
-                  value={examForm.examDate}
+                  placeholder="e.g. Mid Term"
+                  value={examForm.examName}
                   onChange={(event) =>
-                    setExamForm({ ...examForm, examDate: event.target.value })
+                    setExamForm({ ...examForm, examName: event.target.value })
                   }
                   required
                 />
               </label>
               <label className="field">
-                <span>Total Marks</span>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  placeholder="e.g. 100"
-                  value={examForm.totalMarks}
+                <span>Class</span>
+                <select
+                  value={examForm.classId}
+                  onChange={(event) => {
+                    const selectedClass = classes.find(
+                      (classRecord) => classRecord.className === event.target.value,
+                    )
+                    setExamForm({
+                      ...examForm,
+                      classId: event.target.value,
+                      sectionId:
+                        examForm.sectionId && selectedClass ? examForm.sectionId : '',
+                    })
+                  }}
+                >
+                  <option value="">{classes.length ? 'Select class' : 'No classes available'}</option>
+                  {Array.from(
+                    new Set(classes.map((classRecord) => classRecord.className)),
+                  )
+                    .sort((a, b) => a.localeCompare(b))
+                    .map((className) => (
+                      <option key={className} value={className}>
+                        {className}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Section</span>
+                <select
+                  value={examForm.sectionId}
                   onChange={(event) =>
-                    setExamForm({ ...examForm, totalMarks: event.target.value })
+                    setExamForm({ ...examForm, sectionId: event.target.value })
+                  }
+                >
+                  <option value="">Select section</option>
+                  {classes.map((classRecord) => {
+                    if (classRecord.className !== examForm.classId) {
+                      return null
+                    }
+                    return (
+                      <option key={classRecord._id} value={classRecord.section}>
+                        {classRecord.section}
+                      </option>
+                    )
+                  })}
+                </select>
+              </label>
+              <label className="field">
+                <span>Academic Year</span>
+                <input
+                  placeholder="e.g. 2025-26"
+                  value={examForm.academicYear}
+                  onChange={(event) =>
+                    setExamForm({ ...examForm, academicYear: event.target.value })
                   }
                   required
+                />
+              </label>
+              <label className="field">
+                <span>Status</span>
+                <select
+                  value={examForm.status}
+                  onChange={(event) =>
+                    setExamForm({
+                      ...examForm,
+                      status: event.target.value as ExamFormState['status'],
+                    })
+                  }
+                >
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </label>
+              <label className="field field-full">
+                <span>Description (Optional)</span>
+                <input
+                  placeholder="Optional exam description"
+                  value={examForm.description}
+                  onChange={(event) =>
+                    setExamForm({ ...examForm, description: event.target.value })
+                  }
                 />
               </label>
 
@@ -1519,31 +1695,63 @@ function App() {
                 <thead>
                   <tr>
                     <th>Exam Name</th>
-                    <th>Class/Section/Subjects</th>
-                    <th>Exam Date</th>
-                    <th>Total Marks</th>
+                    <th>Class</th>
+                    <th>Academic Year</th>
+                    <th>Subjects Count</th>
+                    <th>Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredExams.map((exam) => (
                     <tr key={exam._id}>
-                      <td>{exam.name}</td>
+                      <td>{exam.examName}</td>
                       <td>
-                        {exam.targets
-                          .map(
-                            (target) =>
-                              `${target.className}-${target.section}: ${target.subjects.join(', ')}`,
-                          )
-                          .join(' | ')}
+                        {exam.classId}-{exam.sectionId}
                       </td>
-                      <td>{new Date(exam.examDate).toLocaleDateString()}</td>
-                      <td>{exam.totalMarks}</td>
+                      <td>{exam.academicYear}</td>
+                      <td>{examSubjectCountByExam[exam._id] || 0}</td>
+                      <td>{exam.status}</td>
                       <td>
                         <div className="row-actions">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedExamId(exam._id)
+                              resetExamSubjectForm()
+                            }}
+                          >
+                            Manage Subjects
+                          </button>
                           <button type="button" onClick={() => startExamEdit(exam)}>
                             Edit
                           </button>
+                          {exam.status === 'draft' ? (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  setError('')
+                                  const response = await fetch(`${examApiPath}/${exam._id}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ ...exam, status: 'published' }),
+                                  })
+                                  const payload = await response.json()
+                                  if (!response.ok) {
+                                    throw new Error(payload.message || 'Failed to publish exam')
+                                  }
+                                  await loadExams()
+                                } catch (err) {
+                                  const message =
+                                    err instanceof Error ? err.message : 'Unexpected error'
+                                  setError(message)
+                                }
+                              }}
+                            >
+                              Publish
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="danger"
@@ -1557,7 +1765,7 @@ function App() {
                   ))}
                   {!filteredExams.length && !examLoading ? (
                     <tr>
-                      <td colSpan={5}>
+                      <td colSpan={6}>
                         {exams.length ? 'No exams match your search.' : 'No exams found.'}
                       </td>
                     </tr>
@@ -1565,6 +1773,187 @@ function App() {
                 </tbody>
               </table>
             </div>
+          </section>
+
+          <section className="panel">
+            <h2>Manage Subjects Inside Exam</h2>
+            {!selectedExam ? (
+              <p>Select an exam to configure its subjects.</p>
+            ) : (
+              <>
+                <div className="exam-info-card">
+                  <p>
+                    <strong>Exam Name:</strong> {selectedExam.examName}
+                  </p>
+                  <p>
+                    <strong>Class:</strong> {selectedExam.classId}-{selectedExam.sectionId}
+                  </p>
+                  <p>
+                    <strong>Academic Year:</strong> {selectedExam.academicYear}
+                  </p>
+                  <p>
+                    <strong>Status:</strong> {selectedExam.status}
+                  </p>
+                </div>
+
+                <form className="student-form" onSubmit={handleExamSubjectSubmit}>
+                  <label className="field">
+                    <span>Subject</span>
+                    <select
+                      value={examSubjectForm.subjectId}
+                      onChange={(event) =>
+                        setExamSubjectForm({
+                          ...examSubjectForm,
+                          subjectId: event.target.value,
+                        })
+                      }
+                      required
+                    >
+                      <option value="">
+                        {examSubjectOptions.length
+                          ? 'Select subject'
+                          : 'No mapped subjects for this class'}
+                      </option>
+                      {examSubjectOptions.map((subjectName) => (
+                        <option key={subjectName} value={subjectName}>
+                          {subjectName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Exam Date</span>
+                    <input
+                      type="date"
+                      value={examSubjectForm.examDate}
+                      onChange={(event) =>
+                        setExamSubjectForm({
+                          ...examSubjectForm,
+                          examDate: event.target.value,
+                        })
+                      }
+                      required
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Maximum Marks</span>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      placeholder="e.g. 100"
+                      value={examSubjectForm.totalMarks}
+                      onChange={(event) =>
+                        setExamSubjectForm({
+                          ...examSubjectForm,
+                          totalMarks: event.target.value,
+                        })
+                      }
+                      required
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Passing Marks</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      placeholder="e.g. 35"
+                      value={examSubjectForm.passingMarks}
+                      onChange={(event) =>
+                        setExamSubjectForm({
+                          ...examSubjectForm,
+                          passingMarks: event.target.value,
+                        })
+                      }
+                      required
+                    />
+                  </label>
+                  <label className="field field-full">
+                    <span>Instructions (Optional)</span>
+                    <input
+                      placeholder="Any special instructions"
+                      value={examSubjectForm.instructions}
+                      onChange={(event) =>
+                        setExamSubjectForm({
+                          ...examSubjectForm,
+                          instructions: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+
+                  <div className="actions">
+                    <button
+                      type="submit"
+                      className="primary"
+                      disabled={examSubjectSubmitting}
+                    >
+                      {examSubjectSubmitting
+                        ? 'Saving...'
+                        : isEditingExamSubject
+                          ? 'Update Subject'
+                          : 'Add Subject'}
+                    </button>
+                    {isEditingExamSubject ? (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={resetExamSubjectForm}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
+                </form>
+
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Subject</th>
+                        <th>Date</th>
+                        <th>Max Marks</th>
+                        <th>Pass Marks</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {examSubjects.map((examSubject) => (
+                        <tr key={examSubject._id}>
+                          <td>{examSubject.subjectId}</td>
+                          <td>{new Date(examSubject.examDate).toLocaleDateString()}</td>
+                          <td>{examSubject.totalMarks}</td>
+                          <td>{examSubject.passingMarks}</td>
+                          <td>
+                            <div className="row-actions">
+                              <button
+                                type="button"
+                                onClick={() => startExamSubjectEdit(examSubject)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={() => void handleExamSubjectDelete(examSubject._id)}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {!examSubjects.length && !examSubjectsLoading ? (
+                        <tr>
+                          <td colSpan={5}>No subjects configured for this exam yet.</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </section>
         </>
       ) : activePage === 'subjects' ? (
