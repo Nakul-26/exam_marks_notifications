@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import ClassSubject from '../models/ClassSubject.js'
 import Exam from '../models/Exam.js'
+import ExamMark from '../models/ExamMark.js'
 import ExamSubject from '../models/ExamSubject.js'
 
 const router = Router()
@@ -137,6 +138,8 @@ router.delete('/:id', async (req, res) => {
     if (!examSubject) {
       return res.status(404).json({ message: 'Exam subject not found' })
     }
+
+    await ExamMark.deleteMany({ examSubjectId: examSubject._id })
 
     return res.json({ message: 'Exam subject deleted' })
   } catch (_error) {

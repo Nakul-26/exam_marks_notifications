@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import './App.css'
 import ClassStudentManagementPage from './pages/ClassStudentManagementPage'
 import ClassSubjectManagementPage from './pages/ClassSubjectManagementPage'
+import MarksManagementPage from './pages/MarksManagementPage'
 import SubjectManagementPage from './pages/SubjectManagementPage'
 
 type Student = {
@@ -291,6 +292,7 @@ function App() {
     | 'students'
     | 'exams'
     | 'subjects'
+    | 'marks'
     | 'classSubjects'
     | 'classStudents'
     | 'classes'
@@ -1283,6 +1285,8 @@ function App() {
                 ? 'Exam Management'
                 : activePage === 'subjects'
                   ? 'Subject Management'
+                  : activePage === 'marks'
+                    ? 'Marks Management'
                   : activePage === 'classSubjects'
                     ? 'Class Subject Mapping'
                     : activePage === 'classStudents'
@@ -1296,6 +1300,8 @@ function App() {
                 ? 'Add, edit, delete, and view all exams.'
                 : activePage === 'subjects'
                   ? 'Create and manage subjects only.'
+                  : activePage === 'marks'
+                    ? 'Manage student marks for existing exams and subjects.'
                   : activePage === 'classSubjects'
                     ? 'Connect subjects to class-section combinations.'
                     : activePage === 'classStudents'
@@ -1324,6 +1330,13 @@ function App() {
             onClick={() => setActivePage('subjects')}
           >
             Subjects
+          </button>
+          <button
+            type="button"
+            className={activePage === 'marks' ? 'tab-button active' : 'tab-button'}
+            onClick={() => setActivePage('marks')}
+          >
+            Marks
           </button>
           <button
             type="button"
@@ -1972,6 +1985,8 @@ function App() {
           startSubjectEdit={startSubjectEdit}
           handleSubjectDelete={handleSubjectDelete}
         />
+      ) : activePage === 'marks' ? (
+        <MarksManagementPage exams={exams} classStudents={classStudents} />
       ) : activePage === 'classSubjects' ? (
         <ClassSubjectManagementPage
           classSubjects={classSubjects}

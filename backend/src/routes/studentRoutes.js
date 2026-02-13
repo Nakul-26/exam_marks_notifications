@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import ClassStudent from '../models/ClassStudent.js'
+import ExamMark from '../models/ExamMark.js'
 import Student from '../models/Student.js'
 
 const router = Router()
@@ -107,6 +108,7 @@ router.delete('/:id', async (req, res) => {
     }
 
     await ClassStudent.deleteMany({ student: student._id })
+    await ExamMark.deleteMany({ studentId: student._id })
 
     return res.json({ message: 'Student deleted' })
   } catch (error) {

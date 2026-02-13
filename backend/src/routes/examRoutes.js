@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import ClassModel from '../models/Class.js'
 import Exam from '../models/Exam.js'
+import ExamMark from '../models/ExamMark.js'
 import ExamSubject from '../models/ExamSubject.js'
 
 const router = Router()
@@ -137,7 +138,14 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Exam not found' })
     }
 
-    await ExamSubject.deleteMany({ examId: req.params.id })
+    const examSubjects = await ExamSubject.find({ examId: req.params.id }).lean()
+    await Promise.all([
+      ExamSubject.deleteMany({ examId: req.params.id }),
+      ExamMark.deleteMany({ examId: req.params.id }),
+      ExamMark.deleteMany({
+        examSubjectId: { $in: examSubjects.map((examSubject) => examSubject._id) },
+      }),
+    ])
     return res.json({ message: 'Exam deleted' })
   } catch (_error) {
     return res.status(400).json({ message: 'Failed to delete exam' })
