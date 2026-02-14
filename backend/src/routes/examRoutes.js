@@ -16,12 +16,71 @@ const normalizeStatus = (value) => {
     : ''
 }
 
+const normalizeExamClasses = (payload = {}) => {
+  const rawExamClasses = Array.isArray(payload.examClasses) ? payload.examClasses : []
+  const normalizedExamClasses = rawExamClasses
+    .map((examClass) => ({
+      classId: asTrimmedString(examClass?.classId),
+      sectionId: asTrimmedString(examClass?.sectionId),
+    }))
+    .filter((examClass) => examClass.classId && examClass.sectionId)
+
+  if (!normalizedExamClasses.length) {
+    const classId = asTrimmedString(payload.classId)
+    const sectionId = asTrimmedString(payload.sectionId)
+    if (classId && sectionId) {
+      normalizedExamClasses.push({ classId, sectionId })
+    }
+  }
+
+  const seen = new Set()
+  return normalizedExamClasses.filter((examClass) => {
+    const key = `${examClass.classId}__${examClass.sectionId}`
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
+const normalizeExamOutput = (exam = {}) => {
+  const examClasses = Array.isArray(exam.examClasses)
+    ? exam.examClasses
+        .map((examClass) => ({
+          classId: asTrimmedString(examClass?.classId),
+          sectionId: asTrimmedString(examClass?.sectionId),
+        }))
+        .filter((examClass) => examClass.classId && examClass.sectionId)
+    : []
+
+  const fallbackClassId = asTrimmedString(exam.classId)
+  const fallbackSectionId = asTrimmedString(exam.sectionId)
+  const effectiveExamClasses = examClasses.length
+    ? examClasses
+    : fallbackClassId && fallbackSectionId
+      ? [{ classId: fallbackClassId, sectionId: fallbackSectionId }]
+      : []
+
+  const [primaryClass] = effectiveExamClasses
+
+  return {
+    ...exam,
+    examClasses: effectiveExamClasses,
+    classId: primaryClass?.classId || '',
+    sectionId: primaryClass?.sectionId || '',
+  }
+}
+
 const normalizeExamInput = (payload = {}) => {
+  const examClasses = normalizeExamClasses(payload)
+  const [primaryClass] = examClasses
   const status = normalizeStatus(payload.status) || 'draft'
   return {
     examName: asTrimmedString(payload.examName),
-    classId: asTrimmedString(payload.classId),
-    sectionId: asTrimmedString(payload.sectionId),
+    examClasses,
+    classId: primaryClass?.classId || '',
+    sectionId: primaryClass?.sectionId || '',
     academicYear: asTrimmedString(payload.academicYear),
     description: asTrimmedString(payload.description),
     status,
@@ -30,8 +89,9 @@ const normalizeExamInput = (payload = {}) => {
 
 const validateExamInput = (exam) => {
   if (!exam.examName) return 'Exam name is required'
-  if (!exam.classId) return 'Class is required'
-  if (!exam.sectionId) return 'Section is required'
+  if (!Array.isArray(exam.examClasses) || !exam.examClasses.length) {
+    return 'At least one class-section is required'
+  }
   if (!exam.academicYear) return 'Academic year is required'
   if (!['draft', 'published', 'completed'].includes(exam.status)) {
     return 'Status is invalid'
@@ -40,13 +100,22 @@ const validateExamInput = (exam) => {
 }
 
 const validateClassExists = async (exam) => {
-  const classRecord = await ClassModel.findOne({
-    className: exam.classId,
-    section: exam.sectionId,
-  }).lean()
+  const classRecords = await ClassModel.find({
+    $or: exam.examClasses.map((examClass) => ({
+      className: examClass.classId,
+      section: examClass.sectionId,
+    })),
+  })
+    .select({ className: 1, section: 1 })
+    .lean()
 
-  if (!classRecord) {
-    return 'Selected class and section does not exist'
+  const classKeys = new Set(classRecords.map((record) => `${record.className}__${record.section}`))
+  const missingClass = exam.examClasses.find(
+    (examClass) => !classKeys.has(`${examClass.classId}__${examClass.sectionId}`),
+  )
+
+  if (missingClass) {
+    return `Selected class and section does not exist: ${missingClass.classId}-${missingClass.sectionId}`
   }
 
   return null
@@ -61,8 +130,26 @@ router.get('/', async (req, res) => {
     const status = normalizeStatus(req.query.status)
     const search = asTrimmedString(req.query.search)
 
-    if (classId) query.classId = classId
-    if (sectionId) query.sectionId = sectionId
+    if (classId && sectionId) {
+      query.$or = [
+        {
+          examClasses: {
+            $elemMatch: { classId, sectionId },
+          },
+        },
+        { classId, sectionId },
+      ]
+    } else if (classId) {
+      query.$or = [
+        { 'examClasses.classId': classId },
+        { classId },
+      ]
+    } else if (sectionId) {
+      query.$or = [
+        { 'examClasses.sectionId': sectionId },
+        { sectionId },
+      ]
+    }
     if (academicYear) query.academicYear = academicYear
     if (status) query.status = status
     if (search) {
@@ -70,7 +157,7 @@ router.get('/', async (req, res) => {
     }
 
     const exams = await Exam.find(query).sort({ createdAt: -1 }).lean()
-    return res.json({ data: exams })
+    return res.json({ data: exams.map(normalizeExamOutput) })
   } catch (_error) {
     return res.status(500).json({ message: 'Failed to fetch exams' })
   }
@@ -90,7 +177,7 @@ router.post('/', async (req, res) => {
     }
 
     const exam = await Exam.create(normalizedExam)
-    return res.status(201).json({ data: exam })
+    return res.status(201).json({ data: normalizeExamOutput(exam.toObject()) })
   } catch (error) {
     if (error.code === 11000) {
       return res.status(400).json({ message: 'Exam already exists for this class and year' })
@@ -121,7 +208,7 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Exam not found' })
     }
 
-    return res.json({ data: exam })
+    return res.json({ data: normalizeExamOutput(exam.toObject()) })
   } catch (error) {
     if (error.code === 11000) {
       return res.status(400).json({ message: 'Exam already exists for this class and year' })

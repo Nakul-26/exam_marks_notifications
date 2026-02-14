@@ -4,6 +4,10 @@ import * as XLSX from 'xlsx'
 
 type Exam = {
   _id: string
+  examClasses?: Array<{
+    classId: string
+    sectionId: string
+  }>
   examName: string
   classId: string
   sectionId: string
@@ -72,6 +76,10 @@ const excelTemplateHeaders = [
   'marksObtained',
   'remarks',
 ]
+const classKeySeparator = '__'
+
+const getClassKey = (classId: string, sectionId: string): string =>
+  `${classId}${classKeySeparator}${sectionId}`
 
 const initialMarkFormState: MarkFormState = {
   examSubjectId: '',
@@ -113,11 +121,19 @@ function MarksManagementPage({ exams, classStudents }: MarksManagementPageProps)
       return []
     }
 
+    const examClassKeys = new Set(
+      (selectedExam.examClasses || []).map((examClass) =>
+        getClassKey(examClass.classId, examClass.sectionId),
+      ),
+    )
+    if (!examClassKeys.size && selectedExam.classId && selectedExam.sectionId) {
+      examClassKeys.add(getClassKey(selectedExam.classId, selectedExam.sectionId))
+    }
+
     return classStudents
       .filter(
         (classStudent) =>
-          classStudent.className === selectedExam.classId &&
-          classStudent.section === selectedExam.sectionId,
+          examClassKeys.has(getClassKey(classStudent.className, classStudent.section)),
       )
       .sort((a, b) => a.studentName.localeCompare(b.studentName))
   }, [classStudents, selectedExam])
@@ -632,7 +648,13 @@ function MarksManagementPage({ exams, classStudents }: MarksManagementPageProps)
               <option value="">{exams.length ? 'Select exam' : 'No exams available'}</option>
               {exams.map((exam) => (
                 <option key={exam._id} value={exam._id}>
-                  {exam.examName} ({exam.classId}-{exam.sectionId}, {exam.academicYear})
+                  {exam.examName} (
+                  {exam.examClasses?.length
+                    ? exam.examClasses
+                        .map((examClass) => `${examClass.classId}-${examClass.sectionId}`)
+                        .join(', ')
+                    : `${exam.classId}-${exam.sectionId}`}
+                  , {exam.academicYear})
                 </option>
               ))}
             </select>
@@ -660,7 +682,12 @@ function MarksManagementPage({ exams, classStudents }: MarksManagementPageProps)
                 <strong>Exam:</strong> {selectedExam.examName}
               </p>
               <p>
-                <strong>Class:</strong> {selectedExam.classId}-{selectedExam.sectionId}
+                <strong>Class(es):</strong>{' '}
+                {selectedExam.examClasses?.length
+                  ? selectedExam.examClasses
+                      .map((examClass) => `${examClass.classId}-${examClass.sectionId}`)
+                      .join(', ')
+                  : `${selectedExam.classId}-${selectedExam.sectionId}`}
               </p>
               <p>
                 <strong>Academic Year:</strong> {selectedExam.academicYear}

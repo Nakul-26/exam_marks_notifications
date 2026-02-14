@@ -74,14 +74,27 @@ const validateReferences = async (examMark) => {
     return `Marks obtained cannot be greater than maximum marks (${examSubject.totalMarks})`
   }
 
+  const examClasses = Array.isArray(exam.examClasses) && exam.examClasses.length
+    ? exam.examClasses
+    : exam.classId && exam.sectionId
+      ? [{ classId: exam.classId, sectionId: exam.sectionId }]
+      : []
+
+  if (!examClasses.length) {
+    return 'Selected exam does not have any class-section mapping'
+  }
+
   const classStudent = await ClassStudent.findOne({
-    className: exam.classId,
-    section: exam.sectionId,
     student: examMark.studentId,
+    $or: examClasses.map((examClass) => ({
+      className: examClass.classId,
+      section: examClass.sectionId,
+    })),
   }).lean()
 
   if (!classStudent) {
-    return `Selected student is not mapped to Class ${exam.classId} Section ${exam.sectionId}`
+    const classLabel = examClasses.map((examClass) => `${examClass.classId}-${examClass.sectionId}`).join(', ')
+    return `Selected student is not mapped to any of the exam classes (${classLabel})`
   }
 
   return null

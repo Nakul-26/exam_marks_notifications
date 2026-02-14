@@ -4,6 +4,7 @@ import './App.css'
 import ClassStudentManagementPage from './pages/ClassStudentManagementPage'
 import ClassSubjectManagementPage from './pages/ClassSubjectManagementPage'
 import MarksManagementPage from './pages/MarksManagementPage'
+import NotificationsPage from './pages/NotificationsPage'
 import SubjectManagementPage from './pages/SubjectManagementPage'
 
 type Student = {
@@ -17,8 +18,14 @@ type Student = {
 
 type StudentFormState = Omit<Student, '_id'>
 
+type ExamClass = {
+  classId: string
+  sectionId: string
+}
+
 type Exam = {
   _id: string
+  examClasses: ExamClass[]
   examName: string
   classId: string
   sectionId: string
@@ -30,6 +37,15 @@ type Exam = {
 
 type ExamFormState = {
   examName: string
+  examClassKeys: string[]
+  academicYear: string
+  description: string
+  status: 'draft' | 'published' | 'completed'
+}
+
+type NormalizedExamFormState = {
+  examName: string
+  examClasses: ExamClass[]
   classId: string
   sectionId: string
   academicYear: string
@@ -104,8 +120,7 @@ const initialStudentFormState: StudentFormState = {
 
 const initialExamFormState: ExamFormState = {
   examName: '',
-  classId: '',
-  sectionId: '',
+  examClassKeys: [],
   academicYear: '',
   description: '',
   status: 'draft',
@@ -148,6 +163,15 @@ const classApiPath = '/api/classes'
 const classSubjectApiPath = '/api/class-subjects'
 const classStudentApiPath = '/api/class-students'
 const phoneRegex = /^\d{10,15}$/
+const classKeySeparator = '__'
+
+const getClassKey = (classId: string, sectionId: string): string =>
+  `${classId}${classKeySeparator}${sectionId}`
+
+const parseClassKey = (classKey: string): ExamClass => {
+  const [classId = '', sectionId = ''] = classKey.split(classKeySeparator)
+  return { classId, sectionId }
+}
 
 const normalizeStudentForm = (form: StudentFormState): StudentFormState => {
   return {
@@ -174,21 +198,39 @@ const validateStudentForm = (form: StudentFormState): string | null => {
   return null
 }
 
-const normalizeExamForm = (form: ExamFormState): ExamFormState => {
+const normalizeExamForm = (form: ExamFormState): NormalizedExamFormState => {
+  const normalizedExamClasses = form.examClassKeys
+    .map((classKey) => parseClassKey(classKey))
+    .map((examClass) => ({
+      classId: examClass.classId.trim(),
+      sectionId: examClass.sectionId.trim(),
+    }))
+    .filter((examClass) => examClass.classId && examClass.sectionId)
+
+  const uniqueExamClasses = normalizedExamClasses.filter((examClass, index, self) => {
+    return (
+      self.findIndex(
+        (candidate) =>
+          candidate.classId === examClass.classId && candidate.sectionId === examClass.sectionId,
+      ) === index
+    )
+  })
+
+  const primaryClass = uniqueExamClasses[0] || { classId: '', sectionId: '' }
   return {
     examName: form.examName.trim(),
-    classId: form.classId.trim(),
-    sectionId: form.sectionId.trim(),
+    examClasses: uniqueExamClasses,
+    classId: primaryClass.classId,
+    sectionId: primaryClass.sectionId,
     academicYear: form.academicYear.trim(),
     description: form.description.trim(),
     status: form.status,
   }
 }
 
-const validateExamForm = (form: ExamFormState): string | null => {
+const validateExamForm = (form: NormalizedExamFormState): string | null => {
   if (!form.examName) return 'Exam Name is required'
-  if (!form.classId) return 'Class is required'
-  if (!form.sectionId) return 'Section is required'
+  if (!form.examClasses.length) return 'At least one Class-Section is required'
   if (!form.academicYear) return 'Academic Year is required'
   if (!['draft', 'published', 'completed'].includes(form.status)) {
     return 'Status is invalid'
@@ -296,6 +338,7 @@ function App() {
     | 'classSubjects'
     | 'classStudents'
     | 'classes'
+    | 'notifications'
   >('students')
 
   const [students, setStudents] = useState<Student[]>([])
@@ -413,12 +456,18 @@ function App() {
   const filteredExams = useMemo(() => {
     const normalizedSearch = examSearch.trim().toLowerCase()
     return exams.filter((exam) => {
-      const classKey = `${exam.classId}__${exam.sectionId}`
-      const matchesClass = !examFilterClassKey || classKey === examFilterClassKey
+      const examClassKeys = (exam.examClasses || []).map((examClass) =>
+        getClassKey(examClass.classId, examClass.sectionId),
+      )
+      const matchesClass =
+        !examFilterClassKey ||
+        examClassKeys.includes(examFilterClassKey) ||
+        getClassKey(exam.classId, exam.sectionId) === examFilterClassKey
       const matchesYear = !examFilterYear || exam.academicYear === examFilterYear
       const matchesStatus = !examFilterStatus || exam.status === examFilterStatus
+      const examClassLabel = examClassKeys.join(' ')
       const searchBlob =
-        `${exam.examName} ${exam.classId} ${exam.sectionId} ${exam.academicYear} ${exam.status}`.toLowerCase()
+        `${exam.examName} ${exam.classId} ${exam.sectionId} ${examClassLabel} ${exam.academicYear} ${exam.status}`.toLowerCase()
       const matchesSearch = !normalizedSearch || searchBlob.includes(normalizedSearch)
 
       return matchesClass && matchesYear && matchesStatus && matchesSearch
@@ -496,11 +545,19 @@ function App() {
       return []
     }
 
+    const examClassKeys = new Set(
+      (selectedExam.examClasses || []).map((examClass) =>
+        getClassKey(examClass.classId, examClass.sectionId),
+      ),
+    )
+    if (!examClassKeys.size && selectedExam.classId && selectedExam.sectionId) {
+      examClassKeys.add(getClassKey(selectedExam.classId, selectedExam.sectionId))
+    }
+
     const names = classSubjects
       .filter(
         (classSubject) =>
-          classSubject.className === selectedExam.classId &&
-          classSubject.section === selectedExam.sectionId,
+          examClassKeys.has(getClassKey(classSubject.className, classSubject.section)),
       )
       .map((classSubject) => classSubject.subject.trim())
       .filter(Boolean)
@@ -721,6 +778,32 @@ function App() {
   const resetExamForm = () => {
     setExamForm(initialExamFormState)
     setEditingExamId(null)
+  }
+
+  const handleExamClassSelection = (classKey: string, checked: boolean) => {
+    setExamForm((previous) => {
+      if (checked) {
+        const nextClassKeys = new Set([...previous.examClassKeys, classKey])
+        return { ...previous, examClassKeys: Array.from(nextClassKeys) }
+      }
+      return {
+        ...previous,
+        examClassKeys: previous.examClassKeys.filter((existingKey) => existingKey !== classKey),
+      }
+    })
+  }
+
+  const selectAllExamClasses = () => {
+    setExamForm((previous) => ({
+      ...previous,
+      examClassKeys: classes.map((classRecord) =>
+        getClassKey(classRecord.className, classRecord.section),
+      ),
+    }))
+  }
+
+  const clearExamClasses = () => {
+    setExamForm((previous) => ({ ...previous, examClassKeys: [] }))
   }
 
   const resetExamSubjectForm = () => {
@@ -1031,10 +1114,15 @@ function App() {
   }
 
   const startExamEdit = (exam: Exam) => {
+    const examClasses = exam.examClasses?.length
+      ? exam.examClasses
+      : exam.classId && exam.sectionId
+        ? [{ classId: exam.classId, sectionId: exam.sectionId }]
+        : []
+
     setExamForm({
       examName: exam.examName,
-      classId: exam.classId,
-      sectionId: exam.sectionId,
+      examClassKeys: examClasses.map((examClass) => getClassKey(examClass.classId, examClass.sectionId)),
       academicYear: exam.academicYear,
       description: exam.description || '',
       status: exam.status,
@@ -1285,12 +1373,14 @@ function App() {
                 ? 'Exam Management'
                 : activePage === 'subjects'
                   ? 'Subject Management'
-                  : activePage === 'marks'
+              : activePage === 'marks'
                     ? 'Marks Management'
                   : activePage === 'classSubjects'
                     ? 'Class Subject Mapping'
                     : activePage === 'classStudents'
                       ? 'Class Student Mapping'
+                      : activePage === 'notifications'
+                        ? 'Parent Notifications'
                   : 'Class Management'}
           </h1>
           <p className="subtitle">
@@ -1300,12 +1390,14 @@ function App() {
                 ? 'Add, edit, delete, and view all exams.'
                 : activePage === 'subjects'
                   ? 'Create and manage subjects only.'
-                  : activePage === 'marks'
+              : activePage === 'marks'
                     ? 'Manage student marks for existing exams and subjects.'
                   : activePage === 'classSubjects'
                     ? 'Connect subjects to class-section combinations.'
                     : activePage === 'classStudents'
                       ? 'Connect students to class-section combinations.'
+                      : activePage === 'notifications'
+                        ? 'Send WhatsApp notifications to parents.'
                   : 'Create and manage class-section combinations.'}
           </p>
         </div>
@@ -1362,6 +1454,13 @@ function App() {
             onClick={() => setActivePage('classes')}
           >
             Classes
+          </button>
+          <button
+            type="button"
+            className={activePage === 'notifications' ? 'tab-button active' : 'tab-button'}
+            onClick={() => setActivePage('notifications')}
+          >
+            Notifications
           </button>
         </div>
       </header>
@@ -1548,7 +1647,7 @@ function App() {
                 >
                   <option value="">All Classes</option>
                   {classes.map((classRecord) => {
-                    const optionValue = `${classRecord.className}__${classRecord.section}`
+                    const optionValue = getClassKey(classRecord.className, classRecord.section)
                     return (
                       <option key={classRecord._id} value={optionValue}>
                         {classRecord.className} - {classRecord.section}
@@ -1600,55 +1699,42 @@ function App() {
                   required
                 />
               </label>
-              <label className="field">
-                <span>Class</span>
-                <select
-                  value={examForm.classId}
-                  onChange={(event) => {
-                    const selectedClass = classes.find(
-                      (classRecord) => classRecord.className === event.target.value,
-                    )
-                    setExamForm({
-                      ...examForm,
-                      classId: event.target.value,
-                      sectionId:
-                        examForm.sectionId && selectedClass ? examForm.sectionId : '',
+              <div className="field field-full">
+                <span>Class-Section(s)</span>
+                <div className="class-picker-actions">
+                  <button type="button" className="secondary" onClick={selectAllExamClasses}>
+                    Select All
+                  </button>
+                  <button type="button" className="secondary" onClick={clearExamClasses}>
+                    Clear
+                  </button>
+                  <span>{examForm.examClassKeys.length} selected</span>
+                </div>
+                <div className="class-checklist">
+                  {classes.length ? (
+                    classes.map((classRecord) => {
+                      const classKey = getClassKey(classRecord.className, classRecord.section)
+                      const isChecked = examForm.examClassKeys.includes(classKey)
+                      return (
+                        <label key={classRecord._id} className="class-checklist-item">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(event) =>
+                              handleExamClassSelection(classKey, event.target.checked)
+                            }
+                          />
+                          <span>
+                            {classRecord.className} - {classRecord.section}
+                          </span>
+                        </label>
+                      )
                     })
-                  }}
-                >
-                  <option value="">{classes.length ? 'Select class' : 'No classes available'}</option>
-                  {Array.from(
-                    new Set(classes.map((classRecord) => classRecord.className)),
-                  )
-                    .sort((a, b) => a.localeCompare(b))
-                    .map((className) => (
-                      <option key={className} value={className}>
-                        {className}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Section</span>
-                <select
-                  value={examForm.sectionId}
-                  onChange={(event) =>
-                    setExamForm({ ...examForm, sectionId: event.target.value })
-                  }
-                >
-                  <option value="">Select section</option>
-                  {classes.map((classRecord) => {
-                    if (classRecord.className !== examForm.classId) {
-                      return null
-                    }
-                    return (
-                      <option key={classRecord._id} value={classRecord.section}>
-                        {classRecord.section}
-                      </option>
-                    )
-                  })}
-                </select>
-              </label>
+                  ) : (
+                    <p className="class-checklist-empty">No classes available</p>
+                  )}
+                </div>
+              </div>
               <label className="field">
                 <span>Academic Year</span>
                 <input
@@ -1708,7 +1794,7 @@ function App() {
                 <thead>
                   <tr>
                     <th>Exam Name</th>
-                    <th>Class</th>
+                    <th>Class(es)</th>
                     <th>Academic Year</th>
                     <th>Subjects Count</th>
                     <th>Status</th>
@@ -1720,7 +1806,11 @@ function App() {
                     <tr key={exam._id}>
                       <td>{exam.examName}</td>
                       <td>
-                        {exam.classId}-{exam.sectionId}
+                        {(exam.examClasses?.length
+                          ? exam.examClasses
+                              .map((examClass) => `${examClass.classId}-${examClass.sectionId}`)
+                              .join(', ')
+                          : `${exam.classId}-${exam.sectionId}`) || '-'}
                       </td>
                       <td>{exam.academicYear}</td>
                       <td>{examSubjectCountByExam[exam._id] || 0}</td>
@@ -1799,7 +1889,12 @@ function App() {
                     <strong>Exam Name:</strong> {selectedExam.examName}
                   </p>
                   <p>
-                    <strong>Class:</strong> {selectedExam.classId}-{selectedExam.sectionId}
+                    <strong>Class(es):</strong>{' '}
+                    {(selectedExam.examClasses?.length
+                      ? selectedExam.examClasses
+                          .map((examClass) => `${examClass.classId}-${examClass.sectionId}`)
+                          .join(', ')
+                      : `${selectedExam.classId}-${selectedExam.sectionId}`) || '-'}
                   </p>
                   <p>
                     <strong>Academic Year:</strong> {selectedExam.academicYear}
@@ -1825,7 +1920,7 @@ function App() {
                       <option value="">
                         {examSubjectOptions.length
                           ? 'Select subject'
-                          : 'No mapped subjects for this class'}
+                          : 'No mapped subjects for selected class(es)'}
                       </option>
                       {examSubjectOptions.map((subjectName) => (
                         <option key={subjectName} value={subjectName}>
@@ -2022,6 +2117,11 @@ function App() {
           filteredClassStudents={filteredClassStudents}
           startClassStudentEdit={startClassStudentEdit}
           handleClassStudentDelete={handleClassStudentDelete}
+        />
+      ) : activePage === 'notifications' ? (
+        <NotificationsPage
+          exams={exams}
+          students={students}
         />
       ) : (
         <>

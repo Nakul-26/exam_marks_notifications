@@ -8,6 +8,7 @@ import classSubjectRoutes from './routes/classSubjectRoutes.js'
 import examRoutes from './routes/examRoutes.js'
 import examMarkRoutes from './routes/examMarkRoutes.js'
 import examSubjectRoutes from './routes/examSubjectRoutes.js'
+import notificationRoutes from './routes/notificationRoutes.js'
 import studentRoutes from './routes/studentRoutes.js'
 import subjectRoutes from './routes/subjectRoutes.js'
 
@@ -32,6 +33,7 @@ app.use('/api/subjects', subjectRoutes)
 app.use('/api/classes', classRoutes)
 app.use('/api/class-subjects', classSubjectRoutes)
 app.use('/api/class-students', classStudentRoutes)
+app.use('/api/notifications', notificationRoutes)
 
 const start = async () => {
   if (!mongoUri) {

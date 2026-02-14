@@ -46,15 +46,28 @@ const validateExamAndSubjectMapping = async (examSubject) => {
     return { message: 'Exam not found' }
   }
 
+  const examClasses = Array.isArray(exam.examClasses) && exam.examClasses.length
+    ? exam.examClasses
+    : exam.classId && exam.sectionId
+      ? [{ classId: exam.classId, sectionId: exam.sectionId }]
+      : []
+
+  if (!examClasses.length) {
+    return { message: 'Exam does not have any class-section mapping' }
+  }
+
   const classSubject = await ClassSubject.findOne({
-    className: exam.classId,
-    section: exam.sectionId,
     subject: examSubject.subjectId,
+    $or: examClasses.map((examClass) => ({
+      className: examClass.classId,
+      section: examClass.sectionId,
+    })),
   }).lean()
 
   if (!classSubject) {
+    const classLabel = examClasses.map((examClass) => `${examClass.classId}-${examClass.sectionId}`).join(', ')
     return {
-      message: `Subject "${examSubject.subjectId}" is not mapped for Class ${exam.classId} Section ${exam.sectionId}`,
+      message: `Subject "${examSubject.subjectId}" is not mapped for exam classes: ${classLabel}`,
     }
   }
 

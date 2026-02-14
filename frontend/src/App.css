@@ -171,6 +171,61 @@ h2 {
   grid-column: 1 / -1;
 }
 
+.class-picker-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.class-picker-actions span {
+  font-size: 0.78rem;
+  color: #4a5b73;
+  font-weight: 600;
+}
+
+.class-checklist {
+  border: 1px solid #ced6e3;
+  border-radius: 10px;
+  background: #ffffff;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0.35rem;
+}
+
+.class-checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid #e5eaf2;
+  border-radius: 999px;
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+  background: #f8fbff;
+}
+
+.class-checklist-item input {
+  margin: 0;
+}
+
+.class-checklist-item span {
+  font-size: 0.84rem;
+  color: #324662;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.class-checklist-empty {
+  margin: 0;
+  color: #5f6f86;
+  font-size: 0.9rem;
+  padding: 0.25rem 0.15rem;
+}
+
 .actions {
   grid-column: 1 / -1;
   display: flex;
@@ -274,6 +329,32 @@ tbody tr:hover {
   margin-bottom: 1rem;
 }
 
+.success {
+  background: #eefbf1;
+  color: #1a6a30;
+  border: 1px solid #bfe6c9;
+  border-radius: 10px;
+  padding: 0.7rem;
+  margin-bottom: 1rem;
+}
+
+.message-box {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #ced6e3;
+  border-radius: 10px;
+  padding: 0.62rem 0.75rem;
+  font-size: 0.95rem;
+  background: #ffffff;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.message-box:focus {
+  outline: 2px solid #78a7da;
+  border-color: #78a7da;
+}
+
 .exam-info-card {
   display: grid;
   gap: 0.4rem;
@@ -317,6 +398,10 @@ tbody tr:hover {
 
   .student-form {
     grid-template-columns: 1fr;
+  }
+
+  .class-checklist {
+    max-height: 220px;
   }
 
   .field-full {
