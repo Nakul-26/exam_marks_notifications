@@ -6,6 +6,9 @@ import ClassSubjectManagementPage from './pages/ClassSubjectManagementPage'
 import MarksManagementPage from './pages/MarksManagementPage'
 import NotificationsPage from './pages/NotificationsPage'
 import SubjectManagementPage from './pages/SubjectManagementPage'
+import LoginPage from './pages/LoginPage'
+import TeacherManagementPage from './pages/TeacherManagementPage'
+import TeacherSubjectManagementPage from './pages/TeacherSubjectManagementPage'
 
 type Student = {
   _id: string
@@ -78,6 +81,40 @@ type Subject = {
 
 type SubjectFormState = Omit<Subject, '_id'>
 
+type Teacher = {
+  _id: string
+  name: string
+  email: string
+  phone: string
+}
+
+type TeacherFormState = Omit<Teacher, '_id'> & {
+  password: string
+}
+
+type AuthUser = {
+  id: string
+  role: 'admin' | 'teacher'
+  name: string
+  email: string
+}
+
+type TeacherSubject = {
+  _id: string
+  className: string
+  section: string
+  subject: string
+  teacher: string
+  teacherName: string
+}
+
+type TeacherSubjectFormState = {
+  className: string
+  section: string
+  subject: string
+  teacher: string
+}
+
 type ClassSubject = {
   _id: string
   className: string
@@ -138,6 +175,20 @@ const initialSubjectFormState: SubjectFormState = {
   name: '',
 }
 
+const initialTeacherFormState: TeacherFormState = {
+  name: '',
+  email: '',
+  phone: '',
+  password: '',
+}
+
+const initialTeacherSubjectFormState: TeacherSubjectFormState = {
+  className: '',
+  section: '',
+  subject: '',
+  teacher: '',
+}
+
 const initialClassSubjectFormState: ClassSubjectFormState = {
   className: '',
   section: '',
@@ -159,11 +210,16 @@ const studentApiPath = '/api/students'
 const examApiPath = '/api/exams'
 const examSubjectApiPath = '/api/exam-subjects'
 const subjectApiPath = '/api/subjects'
+const teacherApiPath = '/api/teachers'
+const teacherSubjectApiPath = '/api/teacher-subjects'
 const classApiPath = '/api/classes'
 const classSubjectApiPath = '/api/class-subjects'
 const classStudentApiPath = '/api/class-students'
 const phoneRegex = /^\d{10,15}$/
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const classKeySeparator = '__'
+const authTokenStorageKey = 'authToken'
+const authUserStorageKey = 'authUser'
 
 const getClassKey = (classId: string, sectionId: string): string =>
   `${classId}${classKeySeparator}${sectionId}`
@@ -282,6 +338,52 @@ const validateSubjectForm = (form: SubjectFormState): string | null => {
   return null
 }
 
+const normalizeTeacherForm = (form: TeacherFormState): TeacherFormState => {
+  return {
+    name: form.name.trim(),
+    email: form.email.trim().toLowerCase(),
+    phone: form.phone.trim(),
+    password: form.password.trim(),
+  }
+}
+
+const validateTeacherForm = (
+  form: TeacherFormState,
+  requirePassword: boolean,
+): string | null => {
+  if (!form.name) return 'Name is required'
+  if (!form.email) return 'Email is required'
+  if (!emailRegex.test(form.email)) return 'Email is invalid'
+  if (!form.phone) return 'Phone is required'
+  if (!phoneRegex.test(form.phone)) return 'Phone must be 10 to 15 digits'
+  if (requirePassword && !form.password) return 'Password is required'
+  if (form.password && form.password.length < 6) {
+    return 'Password must be at least 6 characters'
+  }
+  return null
+}
+
+const normalizeTeacherSubjectForm = (
+  form: TeacherSubjectFormState,
+): TeacherSubjectFormState => {
+  return {
+    className: form.className.trim(),
+    section: form.section.trim(),
+    subject: form.subject.trim(),
+    teacher: form.teacher.trim(),
+  }
+}
+
+const validateTeacherSubjectForm = (
+  form: TeacherSubjectFormState,
+): string | null => {
+  if (!form.className) return 'Class is required'
+  if (!form.section) return 'Section is required'
+  if (!form.subject) return 'Subject is required'
+  if (!form.teacher) return 'Teacher is required'
+  return null
+}
+
 const normalizeClassSubjectForm = (
   form: ClassSubjectFormState,
 ): ClassSubjectFormState => {
@@ -330,10 +432,16 @@ const validateClassForm = (form: ClassFormState): string | null => {
 }
 
 function App() {
+  const [authReady, setAuthReady] = useState(false)
+  const [authToken, setAuthToken] = useState('')
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+
   const [activePage, setActivePage] = useState<
     | 'students'
     | 'exams'
     | 'subjects'
+    | 'teachers'
+    | 'teacherSubjects'
     | 'marks'
     | 'classSubjects'
     | 'classStudents'
@@ -382,6 +490,25 @@ function App() {
   const [subjectLoading, setSubjectLoading] = useState(false)
   const [subjectSubmitting, setSubjectSubmitting] = useState(false)
 
+  const [teachers, setTeachers] = useState<Teacher[]>([])
+  const [teacherForm, setTeacherForm] = useState<TeacherFormState>(
+    initialTeacherFormState,
+  )
+  const [editingTeacherId, setEditingTeacherId] = useState<string | null>(null)
+  const [teacherSearch, setTeacherSearch] = useState('')
+  const [teacherLoading, setTeacherLoading] = useState(false)
+  const [teacherSubmitting, setTeacherSubmitting] = useState(false)
+
+  const [teacherSubjects, setTeacherSubjects] = useState<TeacherSubject[]>([])
+  const [teacherSubjectForm, setTeacherSubjectForm] =
+    useState<TeacherSubjectFormState>(initialTeacherSubjectFormState)
+  const [editingTeacherSubjectId, setEditingTeacherSubjectId] = useState<
+    string | null
+  >(null)
+  const [teacherSubjectSearch, setTeacherSubjectSearch] = useState('')
+  const [teacherSubjectLoading, setTeacherSubjectLoading] = useState(false)
+  const [teacherSubjectSubmitting, setTeacherSubjectSubmitting] = useState(false)
+
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([])
   const [classSubjectForm, setClassSubjectForm] = useState<ClassSubjectFormState>(
     initialClassSubjectFormState,
@@ -412,6 +539,7 @@ function App() {
   const [classSubmitting, setClassSubmitting] = useState(false)
 
   const [error, setError] = useState('')
+  const isTeacherUser = authUser?.role === 'teacher'
 
   const isEditingStudent = useMemo(
     () => Boolean(editingStudentId),
@@ -425,6 +553,14 @@ function App() {
   const isEditingSubject = useMemo(
     () => Boolean(editingSubjectId),
     [editingSubjectId],
+  )
+  const isEditingTeacher = useMemo(
+    () => Boolean(editingTeacherId),
+    [editingTeacherId],
+  )
+  const isEditingTeacherSubject = useMemo(
+    () => Boolean(editingTeacherSubjectId),
+    [editingTeacherSubjectId],
   )
   const isEditingClassSubject = useMemo(
     () => Boolean(editingClassSubjectId),
@@ -484,6 +620,37 @@ function App() {
       return subject.name.toLowerCase().includes(normalizedSearch)
     })
   }, [subjectSearch, subjects])
+
+  const filteredTeachers = useMemo(() => {
+    const normalizedSearch = teacherSearch.trim().toLowerCase()
+    if (!normalizedSearch) {
+      return teachers
+    }
+
+    return teachers.filter((teacher) => {
+      return (
+        teacher.name.toLowerCase().includes(normalizedSearch) ||
+        teacher.email.toLowerCase().includes(normalizedSearch) ||
+        teacher.phone.toLowerCase().includes(normalizedSearch)
+      )
+    })
+  }, [teacherSearch, teachers])
+
+  const filteredTeacherSubjects = useMemo(() => {
+    const normalizedSearch = teacherSubjectSearch.trim().toLowerCase()
+    if (!normalizedSearch) {
+      return teacherSubjects
+    }
+
+    return teacherSubjects.filter((teacherSubject) => {
+      return (
+        teacherSubject.className.toLowerCase().includes(normalizedSearch) ||
+        teacherSubject.section.toLowerCase().includes(normalizedSearch) ||
+        teacherSubject.subject.toLowerCase().includes(normalizedSearch) ||
+        teacherSubject.teacherName.toLowerCase().includes(normalizedSearch)
+      )
+    })
+  }, [teacherSubjectSearch, teacherSubjects])
 
   const filteredClassSubjects = useMemo(() => {
     const normalizedSearch = classSubjectSearch.trim().toLowerCase()
@@ -688,6 +855,48 @@ function App() {
     }
   }
 
+  const loadTeachers = async () => {
+    try {
+      setTeacherLoading(true)
+      setError('')
+
+      const response = await fetch(teacherApiPath)
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to load teachers')
+      }
+
+      setTeachers(payload.data || [])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setTeacherLoading(false)
+    }
+  }
+
+  const loadTeacherSubjects = async () => {
+    try {
+      setTeacherSubjectLoading(true)
+      setError('')
+
+      const response = await fetch(teacherSubjectApiPath)
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to load teacher-subject mappings')
+      }
+
+      setTeacherSubjects(payload.data || [])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setTeacherSubjectLoading(false)
+    }
+  }
+
   const loadClassSubjects = async () => {
     try {
       setClassSubjectLoading(true)
@@ -752,15 +961,56 @@ function App() {
   }
 
   useEffect(() => {
+    const restoreSession = async () => {
+      const savedToken = localStorage.getItem(authTokenStorageKey) || ''
+      const savedUserRaw = localStorage.getItem(authUserStorageKey)
+
+      if (!savedToken || !savedUserRaw) {
+        setAuthReady(true)
+        return
+      }
+
+      try {
+        const response = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${savedToken}` },
+        })
+        const payload = await response.json()
+        if (!response.ok) {
+          throw new Error(payload.message || 'Session expired')
+        }
+
+        const user = payload.data as AuthUser
+        setAuthToken(savedToken)
+        setAuthUser(user)
+        if (user.role === 'teacher') {
+          setActivePage('marks')
+        }
+      } catch (_error) {
+        localStorage.removeItem(authTokenStorageKey)
+        localStorage.removeItem(authUserStorageKey)
+      } finally {
+        setAuthReady(true)
+      }
+    }
+
+    void restoreSession()
+  }, [])
+
+  useEffect(() => {
+    if (!authToken) {
+      return
+    }
     void Promise.all([
       loadStudents(),
       loadExams(),
       loadSubjects(),
+      loadTeachers(),
+      loadTeacherSubjects(),
       loadClassSubjects(),
       loadClassStudents(),
       loadClasses(),
     ])
-  }, [])
+  }, [authToken])
 
   useEffect(() => {
     if (!selectedExamId) {
@@ -814,6 +1064,16 @@ function App() {
   const resetSubjectForm = () => {
     setSubjectForm(initialSubjectFormState)
     setEditingSubjectId(null)
+  }
+
+  const resetTeacherForm = () => {
+    setTeacherForm(initialTeacherFormState)
+    setEditingTeacherId(null)
+  }
+
+  const resetTeacherSubjectForm = () => {
+    setTeacherSubjectForm(initialTeacherSubjectFormState)
+    setEditingTeacherSubjectId(null)
   }
 
   const resetClassSubjectForm = () => {
@@ -990,6 +1250,85 @@ function App() {
     }
   }
 
+  const handleTeacherSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    try {
+      setTeacherSubmitting(true)
+      setError('')
+      const normalizedTeacherForm = normalizeTeacherForm(teacherForm)
+      const validationError = validateTeacherForm(
+        normalizedTeacherForm,
+        !isEditingTeacher,
+      )
+      if (validationError) {
+        throw new Error(validationError)
+      }
+
+      const method = isEditingTeacher ? 'PUT' : 'POST'
+      const url = isEditingTeacher
+        ? `${teacherApiPath}/${editingTeacherId}`
+        : teacherApiPath
+
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(normalizedTeacherForm),
+      })
+
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to save teacher')
+      }
+
+      resetTeacherForm()
+      await Promise.all([loadTeachers(), loadTeacherSubjects()])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setTeacherSubmitting(false)
+    }
+  }
+
+  const handleTeacherSubjectSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    try {
+      setTeacherSubjectSubmitting(true)
+      setError('')
+      const normalizedTeacherSubjectForm = normalizeTeacherSubjectForm(teacherSubjectForm)
+      const validationError = validateTeacherSubjectForm(normalizedTeacherSubjectForm)
+      if (validationError) {
+        throw new Error(validationError)
+      }
+
+      const method = isEditingTeacherSubject ? 'PUT' : 'POST'
+      const url = isEditingTeacherSubject
+        ? `${teacherSubjectApiPath}/${editingTeacherSubjectId}`
+        : teacherSubjectApiPath
+
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(normalizedTeacherSubjectForm),
+      })
+
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to save mapping')
+      }
+
+      resetTeacherSubjectForm()
+      await loadTeacherSubjects()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setTeacherSubjectSubmitting(false)
+    }
+  }
+
   const handleClassSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
@@ -1148,6 +1487,26 @@ function App() {
     setEditingSubjectId(subject._id)
   }
 
+  const startTeacherEdit = (teacher: Teacher) => {
+    setTeacherForm({
+      name: teacher.name,
+      email: teacher.email,
+      phone: teacher.phone,
+      password: '',
+    })
+    setEditingTeacherId(teacher._id)
+  }
+
+  const startTeacherSubjectEdit = (teacherSubject: TeacherSubject) => {
+    setTeacherSubjectForm({
+      className: teacherSubject.className,
+      section: teacherSubject.section,
+      subject: teacherSubject.subject,
+      teacher: teacherSubject.teacher,
+    })
+    setEditingTeacherSubjectId(teacherSubject._id)
+  }
+
   const startClassEdit = (classRecord: ClassRecord) => {
     setClassForm({
       className: classRecord.className,
@@ -1275,7 +1634,59 @@ function App() {
       if (editingSubjectId === id) {
         resetSubjectForm()
       }
-      await Promise.all([loadSubjects(), loadClassSubjects()])
+      await Promise.all([loadSubjects(), loadClassSubjects(), loadTeacherSubjects()])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    }
+  }
+
+  const handleTeacherDelete = async (id: string) => {
+    const shouldDelete = window.confirm('Delete this teacher?')
+    if (!shouldDelete) {
+      return
+    }
+
+    try {
+      setError('')
+      const response = await fetch(`${teacherApiPath}/${id}`, { method: 'DELETE' })
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to delete teacher')
+      }
+
+      if (editingTeacherId === id) {
+        resetTeacherForm()
+      }
+      await loadTeachers()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    }
+  }
+
+  const handleTeacherSubjectDelete = async (id: string) => {
+    const shouldDelete = window.confirm('Delete this mapping?')
+    if (!shouldDelete) {
+      return
+    }
+
+    try {
+      setError('')
+      const response = await fetch(`${teacherSubjectApiPath}/${id}`, {
+        method: 'DELETE',
+      })
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to delete mapping')
+      }
+
+      if (editingTeacherSubjectId === id) {
+        resetTeacherSubjectForm()
+      }
+      await loadTeacherSubjects()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unexpected error'
       setError(message)
@@ -1300,7 +1711,12 @@ function App() {
       if (editingClassId === id) {
         resetClassForm()
       }
-      await Promise.all([loadClasses(), loadClassSubjects(), loadClassStudents()])
+      await Promise.all([
+        loadClasses(),
+        loadClassSubjects(),
+        loadClassStudents(),
+        loadTeacherSubjects(),
+      ])
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unexpected error'
       setError(message)
@@ -1361,18 +1777,55 @@ function App() {
     }
   }
 
+  const handleLoginSuccess = (payload: { token: string; user: AuthUser }) => {
+    setAuthToken(payload.token)
+    setAuthUser(payload.user)
+    localStorage.setItem(authTokenStorageKey, payload.token)
+    localStorage.setItem(authUserStorageKey, JSON.stringify(payload.user))
+    setError('')
+    setActivePage(payload.user.role === 'teacher' ? 'marks' : 'students')
+  }
+
+  const handleLogout = () => {
+    setAuthToken('')
+    setAuthUser(null)
+    localStorage.removeItem(authTokenStorageKey)
+    localStorage.removeItem(authUserStorageKey)
+    setError('')
+  }
+
+  if (!authReady) {
+    return (
+      <main className="page">
+        <section className="panel" style={{ maxWidth: 520, margin: '4rem auto 0' }}>
+          <p>Checking session...</p>
+        </section>
+      </main>
+    )
+  }
+
+  if (!authToken || !authUser) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />
+  }
+
   return (
     <main className="page">
       <header className="topbar">
         <div>
           <p className="eyebrow">Exam Marks Module</p>
           <h1>
-            {activePage === 'students'
+            {isTeacherUser
+              ? 'Teacher Marks Portal'
+              : activePage === 'students'
               ? 'Student Management'
               : activePage === 'exams'
                 ? 'Exam Management'
                 : activePage === 'subjects'
                   ? 'Subject Management'
+                  : activePage === 'teachers'
+                    ? 'Teacher Management'
+                    : activePage === 'teacherSubjects'
+                      ? 'Teacher Subject Mapping'
               : activePage === 'marks'
                     ? 'Marks Management'
                   : activePage === 'classSubjects'
@@ -1384,12 +1837,18 @@ function App() {
                   : 'Class Management'}
           </h1>
           <p className="subtitle">
-            {activePage === 'students'
+            {isTeacherUser
+              ? 'Manage marks for your assigned class-subject mappings.'
+              : activePage === 'students'
               ? 'Add, update, remove, and view student records only.'
               : activePage === 'exams'
                 ? 'Add, edit, delete, and view all exams.'
                 : activePage === 'subjects'
                   ? 'Create and manage subjects only.'
+                  : activePage === 'teachers'
+                    ? 'Create and manage teacher records only.'
+                    : activePage === 'teacherSubjects'
+                      ? 'Assign teachers to class and subject combinations.'
               : activePage === 'marks'
                     ? 'Manage student marks for existing exams and subjects.'
                   : activePage === 'classSubjects'
@@ -1402,65 +1861,96 @@ function App() {
           </p>
         </div>
         <div className="tab-actions">
-          <button
-            type="button"
-            className={activePage === 'students' ? 'tab-button active' : 'tab-button'}
-            onClick={() => setActivePage('students')}
-          >
-            Students
-          </button>
-          <button
-            type="button"
-            className={activePage === 'exams' ? 'tab-button active' : 'tab-button'}
-            onClick={() => setActivePage('exams')}
-          >
-            Exams
-          </button>
-          <button
-            type="button"
-            className={activePage === 'subjects' ? 'tab-button active' : 'tab-button'}
-            onClick={() => setActivePage('subjects')}
-          >
-            Subjects
-          </button>
-          <button
-            type="button"
-            className={activePage === 'marks' ? 'tab-button active' : 'tab-button'}
-            onClick={() => setActivePage('marks')}
-          >
-            Marks
-          </button>
-          <button
-            type="button"
-            className={
-              activePage === 'classSubjects' ? 'tab-button active' : 'tab-button'
-            }
-            onClick={() => setActivePage('classSubjects')}
-          >
-            Class Subjects
-          </button>
-          <button
-            type="button"
-            className={
-              activePage === 'classStudents' ? 'tab-button active' : 'tab-button'
-            }
-            onClick={() => setActivePage('classStudents')}
-          >
-            Class Students
-          </button>
-          <button
-            type="button"
-            className={activePage === 'classes' ? 'tab-button active' : 'tab-button'}
-            onClick={() => setActivePage('classes')}
-          >
-            Classes
-          </button>
-          <button
-            type="button"
-            className={activePage === 'notifications' ? 'tab-button active' : 'tab-button'}
-            onClick={() => setActivePage('notifications')}
-          >
-            Notifications
+          {isTeacherUser ? (
+            <button
+              type="button"
+              className={activePage === 'marks' ? 'tab-button active' : 'tab-button'}
+              onClick={() => setActivePage('marks')}
+            >
+              Marks
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className={activePage === 'students' ? 'tab-button active' : 'tab-button'}
+                onClick={() => setActivePage('students')}
+              >
+                Students
+              </button>
+              <button
+                type="button"
+                className={activePage === 'exams' ? 'tab-button active' : 'tab-button'}
+                onClick={() => setActivePage('exams')}
+              >
+                Exams
+              </button>
+              <button
+                type="button"
+                className={activePage === 'subjects' ? 'tab-button active' : 'tab-button'}
+                onClick={() => setActivePage('subjects')}
+              >
+                Subjects
+              </button>
+              <button
+                type="button"
+                className={activePage === 'teachers' ? 'tab-button active' : 'tab-button'}
+                onClick={() => setActivePage('teachers')}
+              >
+                Teachers
+              </button>
+              <button
+                type="button"
+                className={
+                  activePage === 'teacherSubjects' ? 'tab-button active' : 'tab-button'
+                }
+                onClick={() => setActivePage('teacherSubjects')}
+              >
+                Teacher Subjects
+              </button>
+              <button
+                type="button"
+                className={activePage === 'marks' ? 'tab-button active' : 'tab-button'}
+                onClick={() => setActivePage('marks')}
+              >
+                Marks
+              </button>
+              <button
+                type="button"
+                className={
+                  activePage === 'classSubjects' ? 'tab-button active' : 'tab-button'
+                }
+                onClick={() => setActivePage('classSubjects')}
+              >
+                Class Subjects
+              </button>
+              <button
+                type="button"
+                className={
+                  activePage === 'classStudents' ? 'tab-button active' : 'tab-button'
+                }
+                onClick={() => setActivePage('classStudents')}
+              >
+                Class Students
+              </button>
+              <button
+                type="button"
+                className={activePage === 'classes' ? 'tab-button active' : 'tab-button'}
+                onClick={() => setActivePage('classes')}
+              >
+                Classes
+              </button>
+              <button
+                type="button"
+                className={activePage === 'notifications' ? 'tab-button active' : 'tab-button'}
+                onClick={() => setActivePage('notifications')}
+              >
+                Notifications
+              </button>
+            </>
+          )}
+          <button type="button" className="tab-button" onClick={handleLogout}>
+            Logout
           </button>
         </div>
       </header>
@@ -2080,8 +2570,47 @@ function App() {
           startSubjectEdit={startSubjectEdit}
           handleSubjectDelete={handleSubjectDelete}
         />
+      ) : activePage === 'teachers' ? (
+        <TeacherManagementPage
+          teachers={teachers}
+          teacherSearch={teacherSearch}
+          setTeacherSearch={setTeacherSearch}
+          isEditingTeacher={isEditingTeacher}
+          handleTeacherSubmit={handleTeacherSubmit}
+          teacherForm={teacherForm}
+          setTeacherForm={setTeacherForm}
+          teacherSubmitting={teacherSubmitting}
+          resetTeacherForm={resetTeacherForm}
+          teacherLoading={teacherLoading}
+          filteredTeachers={filteredTeachers}
+          startTeacherEdit={startTeacherEdit}
+          handleTeacherDelete={handleTeacherDelete}
+        />
+      ) : activePage === 'teacherSubjects' ? (
+        <TeacherSubjectManagementPage
+          teacherSubjects={teacherSubjects}
+          classes={classes}
+          subjects={subjects}
+          teachers={teachers}
+          teacherSubjectSearch={teacherSubjectSearch}
+          setTeacherSubjectSearch={setTeacherSubjectSearch}
+          isEditingTeacherSubject={isEditingTeacherSubject}
+          handleTeacherSubjectSubmit={handleTeacherSubjectSubmit}
+          teacherSubjectForm={teacherSubjectForm}
+          setTeacherSubjectForm={setTeacherSubjectForm}
+          teacherSubjectSubmitting={teacherSubjectSubmitting}
+          resetTeacherSubjectForm={resetTeacherSubjectForm}
+          teacherSubjectLoading={teacherSubjectLoading}
+          filteredTeacherSubjects={filteredTeacherSubjects}
+          startTeacherSubjectEdit={startTeacherSubjectEdit}
+          handleTeacherSubjectDelete={handleTeacherSubjectDelete}
+        />
       ) : activePage === 'marks' ? (
-        <MarksManagementPage exams={exams} classStudents={classStudents} />
+        <MarksManagementPage
+          exams={exams}
+          classStudents={classStudents}
+          authToken={authToken}
+        />
       ) : activePage === 'classSubjects' ? (
         <ClassSubjectManagementPage
           classSubjects={classSubjects}

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import ClassSubject from '../models/ClassSubject.js'
 import Subject from '../models/Subject.js'
+import TeacherSubject from '../models/TeacherSubject.js'
 
 const router = Router()
 
@@ -64,10 +65,16 @@ router.put('/:id', async (req, res) => {
     const subject = await existingSubject.save()
 
     if (previousName !== subject.name) {
-      await ClassSubject.updateMany(
-        { subject: previousName },
-        { $set: { subject: subject.name } },
-      )
+      await Promise.all([
+        ClassSubject.updateMany(
+          { subject: previousName },
+          { $set: { subject: subject.name } },
+        ),
+        TeacherSubject.updateMany(
+          { subject: previousName },
+          { $set: { subject: subject.name } },
+        ),
+      ])
     }
 
     return res.json({ data: subject })
@@ -87,7 +94,10 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Subject not found' })
     }
 
-    await ClassSubject.deleteMany({ subject: subject.name })
+    await Promise.all([
+      ClassSubject.deleteMany({ subject: subject.name }),
+      TeacherSubject.deleteMany({ subject: subject.name }),
+    ])
 
     return res.json({ message: 'Subject deleted' })
   } catch (_error) {

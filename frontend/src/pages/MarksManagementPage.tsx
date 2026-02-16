@@ -66,6 +66,7 @@ type BulkMarkRow = {
 type MarksManagementPageProps = {
   exams: Exam[]
   classStudents: ClassStudent[]
+  authToken: string
 }
 
 const examMarkApiPath = '/api/exam-marks'
@@ -88,7 +89,7 @@ const initialMarkFormState: MarkFormState = {
   remarks: '',
 }
 
-function MarksManagementPage({ exams, classStudents }: MarksManagementPageProps) {
+function MarksManagementPage({ exams, classStudents, authToken }: MarksManagementPageProps) {
   const [selectedExamId, setSelectedExamId] = useState('')
   const [subjectFilterId, setSubjectFilterId] = useState('')
   const [examSubjects, setExamSubjects] = useState<ExamSubject[]>([])
@@ -104,6 +105,11 @@ function MarksManagementPage({ exams, classStudents }: MarksManagementPageProps)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
+
+  const authHeader = useMemo(
+    () => ({ Authorization: `Bearer ${authToken}` }),
+    [authToken],
+  )
 
   const selectedExam =
     exams.find((exam) => exam._id === selectedExamId) || null
@@ -189,7 +195,9 @@ function MarksManagementPage({ exams, classStudents }: MarksManagementPageProps)
     try {
       setLoading(true)
       setError('')
-      const response = await fetch(`${examMarkApiPath}/exam/${examId}`)
+      const response = await fetch(`${examMarkApiPath}/exam/${examId}`, {
+        headers: authHeader,
+      })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -304,7 +312,7 @@ function MarksManagementPage({ exams, classStudents }: MarksManagementPageProps)
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify({
           examId: selectedExamId,
           examSubjectId: markForm.examSubjectId,
@@ -347,7 +355,10 @@ function MarksManagementPage({ exams, classStudents }: MarksManagementPageProps)
 
     try {
       setError('')
-      const response = await fetch(`${examMarkApiPath}/${id}`, { method: 'DELETE' })
+      const response = await fetch(`${examMarkApiPath}/${id}`, {
+        method: 'DELETE',
+        headers: authHeader,
+      })
       const payload = await response.json()
       if (!response.ok) {
         throw new Error(payload.message || 'Failed to delete marks')
@@ -426,7 +437,7 @@ function MarksManagementPage({ exams, classStudents }: MarksManagementPageProps)
 
           const response = await fetch(url, {
             method,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeader },
             body: JSON.stringify({
               examId: selectedExamId,
               examSubjectId: bulkSubjectId,
@@ -601,7 +612,7 @@ function MarksManagementPage({ exams, classStudents }: MarksManagementPageProps)
 
           const response = await fetch(url, {
             method,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeader },
             body: JSON.stringify({
               examId: selectedExamId,
               examSubjectId: bulkSubjectId,

@@ -2,6 +2,7 @@ import { Router } from 'express'
 import ClassSubject from '../models/ClassSubject.js'
 import ClassStudent from '../models/ClassStudent.js'
 import ClassModel from '../models/Class.js'
+import TeacherSubject from '../models/TeacherSubject.js'
 
 const router = Router()
 
@@ -98,6 +99,10 @@ router.delete('/:id', async (req, res) => {
         section: classRecord.section,
       }),
       ClassStudent.deleteMany({
+        className: classRecord.className,
+        section: classRecord.section,
+      }),
+      TeacherSubject.deleteMany({
         className: classRecord.className,
         section: classRecord.section,
       }),

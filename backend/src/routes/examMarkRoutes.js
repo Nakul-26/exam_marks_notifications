@@ -4,8 +4,12 @@ import Exam from '../models/Exam.js'
 import ExamMark from '../models/ExamMark.js'
 import ExamSubject from '../models/ExamSubject.js'
 import Student from '../models/Student.js'
+import TeacherSubject from '../models/TeacherSubject.js'
+import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
 
 const router = Router()
+router.use(requireAuth)
+router.use(authorizeRoles('admin', 'teacher'))
 
 const asTrimmedString = (value) =>
   typeof value === 'string' ? value.trim() : ''
@@ -97,7 +101,72 @@ const validateReferences = async (examMark) => {
     return `Selected student is not mapped to any of the exam classes (${classLabel})`
   }
 
+  return {
+    exam,
+    examSubject,
+    classStudent,
+  }
+}
+
+const validateTeacherAuthorization = async ({ teacherId, classStudent, examSubject }) => {
+  const teacherSubject = await TeacherSubject.findOne({
+    teacher: teacherId,
+    className: classStudent.className,
+    section: classStudent.section,
+    subject: examSubject.subjectId,
+  }).lean()
+
+  if (!teacherSubject) {
+    return 'You are not allowed to manage marks for this class and subject'
+  }
+
   return null
+}
+
+const filterMarksForTeacher = async (teacherId, marks) => {
+  if (!marks.length) return marks
+
+  const teacherMappings = await TeacherSubject.find({ teacher: teacherId }).lean()
+  const allowedMap = new Set(
+    teacherMappings.map(
+      (mapping) => `${mapping.className}__${mapping.section}__${mapping.subject}`,
+    ),
+  )
+  if (!allowedMap.size) return []
+
+  const studentIds = Array.from(
+    new Set(
+      marks.map((mark) =>
+        typeof mark.studentId === 'string' ? mark.studentId : String(mark.studentId?._id || ''),
+      ),
+    ),
+  ).filter(Boolean)
+  if (!studentIds.length) return []
+
+  const classStudents = await ClassStudent.find({
+    student: { $in: studentIds },
+  }).lean()
+  const classKeysByStudentId = new Map()
+  for (const classStudent of classStudents) {
+    const studentId = String(classStudent.student)
+    const classKey = `${classStudent.className}__${classStudent.section}`
+    const existing = classKeysByStudentId.get(studentId) || []
+    existing.push(classKey)
+    classKeysByStudentId.set(studentId, existing)
+  }
+
+  return marks.filter((mark) => {
+    const studentId =
+      typeof mark.studentId === 'string'
+        ? mark.studentId
+        : String(mark.studentId?._id || '')
+    const subjectId =
+      typeof mark.examSubjectId === 'string' ? '' : mark.examSubjectId?.subjectId || ''
+    if (!studentId || !subjectId) return false
+
+    const classKeys = classKeysByStudentId.get(studentId) || []
+    return classKeys.some((classKey) => allowedMap.has(`${classKey}__${subjectId}`))
+  })
 }
 
 router.get('/exam/:examId', async (req, res) => {
@@ -108,7 +177,12 @@ router.get('/exam/:examId', async (req, res) => {
       .sort({ updatedAt: -1, createdAt: -1 })
       .lean()
 
-    return res.json({ data: marks.map(normalizeExamMarkOutput) })
+    const authorizedMarks =
+      req.user.role === 'teacher'
+        ? await filterMarksForTeacher(req.user.id, marks)
+        : marks
+
+    return res.json({ data: authorizedMarks.map(normalizeExamMarkOutput) })
   } catch (_error) {
     return res.status(500).json({ message: 'Failed to fetch marks' })
   }
@@ -122,7 +196,12 @@ router.get('/exam-subject/:examSubjectId', async (req, res) => {
       .sort({ updatedAt: -1, createdAt: -1 })
       .lean()
 
-    return res.json({ data: marks.map(normalizeExamMarkOutput) })
+    const authorizedMarks =
+      req.user.role === 'teacher'
+        ? await filterMarksForTeacher(req.user.id, marks)
+        : marks
+
+    return res.json({ data: authorizedMarks.map(normalizeExamMarkOutput) })
   } catch (_error) {
     return res.status(500).json({ message: 'Failed to fetch marks' })
   }
@@ -130,15 +209,30 @@ router.get('/exam-subject/:examSubjectId', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
+    if (!req.user?.id || !req.user?.role) {
+      return res.status(401).json({ message: 'Authentication required' })
+    }
+
     const normalizedExamMark = normalizeExamMarkInput(req.body)
     const validationError = validateExamMarkInput(normalizedExamMark)
     if (validationError) {
       return res.status(400).json({ message: validationError })
     }
 
-    const referenceError = await validateReferences(normalizedExamMark)
-    if (referenceError) {
-      return res.status(400).json({ message: referenceError })
+    const referenceResult = await validateReferences(normalizedExamMark)
+    if (typeof referenceResult === 'string') {
+      return res.status(400).json({ message: referenceResult })
+    }
+
+    if (req.user.role === 'teacher') {
+      const authError = await validateTeacherAuthorization({
+        teacherId: req.user.id,
+        classStudent: referenceResult.classStudent,
+        examSubject: referenceResult.examSubject,
+      })
+      if (authError) {
+        return res.status(403).json({ message: authError })
+      }
     }
 
     const examMark = await ExamMark.create(normalizedExamMark)
@@ -155,15 +249,30 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
+    if (!req.user?.id || !req.user?.role) {
+      return res.status(401).json({ message: 'Authentication required' })
+    }
+
     const normalizedExamMark = normalizeExamMarkInput(req.body)
     const validationError = validateExamMarkInput(normalizedExamMark)
     if (validationError) {
       return res.status(400).json({ message: validationError })
     }
 
-    const referenceError = await validateReferences(normalizedExamMark)
-    if (referenceError) {
-      return res.status(400).json({ message: referenceError })
+    const referenceResult = await validateReferences(normalizedExamMark)
+    if (typeof referenceResult === 'string') {
+      return res.status(400).json({ message: referenceResult })
+    }
+
+    if (req.user.role === 'teacher') {
+      const authError = await validateTeacherAuthorization({
+        teacherId: req.user.id,
+        classStudent: referenceResult.classStudent,
+        examSubject: referenceResult.examSubject,
+      })
+      if (authError) {
+        return res.status(403).json({ message: authError })
+      }
     }
 
     const examMark = await ExamMark.findByIdAndUpdate(
@@ -192,11 +301,39 @@ router.put('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const examMark = await ExamMark.findByIdAndDelete(req.params.id)
+    if (!req.user?.id || !req.user?.role) {
+      return res.status(401).json({ message: 'Authentication required' })
+    }
+
+    const examMark = await ExamMark.findById(req.params.id).lean()
 
     if (!examMark) {
       return res.status(404).json({ message: 'Marks record not found' })
     }
+
+    const referenceResult = await validateReferences({
+      examId: String(examMark.examId),
+      examSubjectId: String(examMark.examSubjectId),
+      studentId: String(examMark.studentId),
+      marksObtained: Number(examMark.marksObtained),
+      remarks: examMark.remarks || '',
+    })
+    if (typeof referenceResult === 'string') {
+      return res.status(400).json({ message: referenceResult })
+    }
+
+    if (req.user.role === 'teacher') {
+      const authError = await validateTeacherAuthorization({
+        teacherId: req.user.id,
+        classStudent: referenceResult.classStudent,
+        examSubject: referenceResult.examSubject,
+      })
+      if (authError) {
+        return res.status(403).json({ message: authError })
+      }
+    }
+
+    await ExamMark.findByIdAndDelete(req.params.id)
 
     return res.json({ message: 'Marks deleted' })
   } catch (_error) {
