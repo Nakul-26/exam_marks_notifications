@@ -20,6 +20,7 @@ dotenv.config()
 const app = express()
 const port = process.env.PORT || 5000
 const mongoUri = process.env.MONGO_URI
+const jwtSecret = process.env.JWT_SECRET
 
 app.use(cors())
 app.use(express.json())
@@ -44,6 +45,9 @@ app.use('/api/notifications', notificationRoutes)
 const start = async () => {
   if (!mongoUri) {
     throw new Error('MONGO_URI is required')
+  }
+  if (!jwtSecret) {
+    throw new Error('JWT_SECRET is required')
   }
 
   await mongoose.connect(mongoUri)

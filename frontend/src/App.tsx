@@ -1949,7 +1949,7 @@ function App() {
               </button>
             </>
           )}
-          <button type="button" className="tab-button" onClick={handleLogout}>
+          <button type="button" className="tab-button logout-button" onClick={handleLogout}>
             Logout
           </button>
         </div>

@@ -249,6 +249,18 @@ h2 {
   color: #ffffff;
 }
 
+.logout-button {
+  margin-left: 0.25rem;
+  border-color: #f3c0c0;
+  background: linear-gradient(130deg, #fff3f3 0%, #ffe6e6 100%);
+  color: #9f1e1e;
+}
+
+.logout-button:hover {
+  background: linear-gradient(130deg, #ffeaea 0%, #ffdcdc 100%);
+  border-color: #e8aaaa;
+}
+
 button {
   border: 1px solid #ccd5e4;
   background: #f3f6fa;

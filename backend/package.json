@@ -5,7 +5,11 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "users:create-admin": "node src/scripts/createAdmin.js",
+    "users:admin-password": "node src/scripts/changeAdminPassword.js",
+    "users:list": "node src/scripts/listUsers.js",
+    "users:password": "node src/scripts/changePassword.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
