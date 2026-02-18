@@ -167,7 +167,9 @@ function MarksManagementPage({ exams, classStudents, authToken }: MarksManagemen
     try {
       setSubjectLoading(true)
       setError('')
-      const response = await fetch(`${examSubjectApiPath}/exam/${examId}`)
+      const response = await fetch(`${examSubjectApiPath}/exam/${examId}`, {
+        headers: authHeader,
+      })
       const payload = await response.json()
 
       if (!response.ok) {

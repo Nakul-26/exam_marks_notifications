@@ -3,8 +3,12 @@ import ClassSubject from '../models/ClassSubject.js'
 import Exam from '../models/Exam.js'
 import ExamMark from '../models/ExamMark.js'
 import ExamSubject from '../models/ExamSubject.js'
+import TeacherSubject from '../models/TeacherSubject.js'
+import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
 
 const router = Router()
+router.use(requireAuth)
+router.use(authorizeRoles('admin', 'teacher'))
 
 const asTrimmedString = (value) =>
   typeof value === 'string' ? value.trim() : ''
@@ -76,7 +80,47 @@ const validateExamAndSubjectMapping = async (examSubject) => {
 
 router.get('/exam/:examId', async (req, res) => {
   try {
-    const examSubjects = await ExamSubject.find({ examId: req.params.examId })
+    const query = { examId: req.params.examId }
+
+    if (req.user.role === 'teacher') {
+      const exam = await Exam.findById(req.params.examId).lean()
+      if (!exam) {
+        return res.status(404).json({ message: 'Exam not found' })
+      }
+
+      const examClasses = Array.isArray(exam.examClasses) && exam.examClasses.length
+        ? exam.examClasses
+        : exam.classId && exam.sectionId
+          ? [{ classId: exam.classId, sectionId: exam.sectionId }]
+          : []
+
+      if (!examClasses.length) {
+        return res.json({ data: [] })
+      }
+
+      const teacherMappings = await TeacherSubject.find({ teacher: req.user.id })
+        .select({ className: 1, section: 1, subject: 1 })
+        .lean()
+      const examClassKeys = new Set(
+        examClasses.map((examClass) => `${examClass.classId}__${examClass.sectionId}`),
+      )
+      const allowedSubjects = Array.from(
+        new Set(
+          teacherMappings
+            .filter((mapping) =>
+              examClassKeys.has(`${mapping.className}__${mapping.section}`),
+            )
+            .map((mapping) => mapping.subject),
+        ),
+      )
+
+      if (!allowedSubjects.length) {
+        return res.json({ data: [] })
+      }
+      query.subjectId = { $in: allowedSubjects }
+    }
+
+    const examSubjects = await ExamSubject.find(query)
       .sort({ examDate: 1, createdAt: -1 })
       .lean()
 
@@ -87,6 +131,10 @@ router.get('/exam/:examId', async (req, res) => {
 })
 
 router.post('/', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const normalizedExamSubject = normalizeExamSubjectInput(req.body)
     const validationError = validateExamSubjectInput(normalizedExamSubject)
@@ -110,6 +158,10 @@ router.post('/', async (req, res) => {
 })
 
 router.put('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const normalizedExamSubject = normalizeExamSubjectInput(req.body)
     const validationError = validateExamSubjectInput(normalizedExamSubject)
@@ -145,6 +197,10 @@ router.put('/:id', async (req, res) => {
 })
 
 router.delete('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const examSubject = await ExamSubject.findByIdAndDelete(req.params.id)
 

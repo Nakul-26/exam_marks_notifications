@@ -540,6 +540,10 @@ function App() {
 
   const [error, setError] = useState('')
   const isTeacherUser = authUser?.role === 'teacher'
+  const authHeader = useMemo(
+    () => ({ Authorization: `Bearer ${authToken}` }),
+    [authToken],
+  )
 
   const isEditingStudent = useMemo(
     () => Boolean(editingStudentId),
@@ -737,7 +741,7 @@ function App() {
       setStudentLoading(true)
       setError('')
 
-      const response = await fetch(studentApiPath)
+      const response = await fetch(studentApiPath, { headers: authHeader })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -765,7 +769,7 @@ function App() {
       setExamLoading(true)
       setError('')
 
-      const response = await fetch(examApiPath)
+      const response = await fetch(examApiPath, { headers: authHeader })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -787,7 +791,9 @@ function App() {
       const countEntries = await Promise.all(
         loadedExams.map(async (exam: Exam) => {
           try {
-            const countResponse = await fetch(`${examSubjectApiPath}/exam/${exam._id}`)
+            const countResponse = await fetch(`${examSubjectApiPath}/exam/${exam._id}`, {
+              headers: authHeader,
+            })
             const countPayload = await countResponse.json()
             if (!countResponse.ok) {
               return [exam._id, 0]
@@ -813,7 +819,9 @@ function App() {
       setExamSubjectsLoading(true)
       setError('')
 
-      const response = await fetch(`${examSubjectApiPath}/exam/${examId}`)
+      const response = await fetch(`${examSubjectApiPath}/exam/${examId}`, {
+        headers: authHeader,
+      })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -923,7 +931,7 @@ function App() {
       setClassStudentLoading(true)
       setError('')
 
-      const response = await fetch(classStudentApiPath)
+      const response = await fetch(classStudentApiPath, { headers: authHeader })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -1110,7 +1118,7 @@ function App() {
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify(normalizedStudentForm),
       })
 
@@ -1146,7 +1154,7 @@ function App() {
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify(normalizedExamForm),
       })
 
@@ -1188,7 +1196,7 @@ function App() {
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify({
           examId: selectedExamId,
           ...normalizedExamSubjectForm,
@@ -1422,7 +1430,7 @@ function App() {
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify(normalizedClassStudentForm),
       })
 
@@ -1541,7 +1549,10 @@ function App() {
 
     try {
       setError('')
-      const response = await fetch(`${studentApiPath}/${id}`, { method: 'DELETE' })
+      const response = await fetch(`${studentApiPath}/${id}`, {
+        method: 'DELETE',
+        headers: authHeader,
+      })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -1566,7 +1577,10 @@ function App() {
 
     try {
       setError('')
-      const response = await fetch(`${examApiPath}/${id}`, { method: 'DELETE' })
+      const response = await fetch(`${examApiPath}/${id}`, {
+        method: 'DELETE',
+        headers: authHeader,
+      })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -1599,7 +1613,10 @@ function App() {
 
     try {
       setError('')
-      const response = await fetch(`${examSubjectApiPath}/${id}`, { method: 'DELETE' })
+      const response = await fetch(`${examSubjectApiPath}/${id}`, {
+        method: 'DELETE',
+        headers: authHeader,
+      })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -1760,6 +1777,7 @@ function App() {
       setError('')
       const response = await fetch(`${classStudentApiPath}/${id}`, {
         method: 'DELETE',
+        headers: authHeader,
       })
       const payload = await response.json()
 
@@ -1838,7 +1856,9 @@ function App() {
           </h1>
           <p className="subtitle">
             {isTeacherUser
-              ? 'Manage marks for your assigned class-subject mappings.'
+              ? activePage === 'notifications'
+                ? 'Send WhatsApp notifications only for your assigned students.'
+                : 'Manage marks for your assigned class-subject mappings.'
               : activePage === 'students'
               ? 'Add, update, remove, and view student records only.'
               : activePage === 'exams'
@@ -1862,13 +1882,22 @@ function App() {
         </div>
         <div className="tab-actions">
           {isTeacherUser ? (
-            <button
-              type="button"
-              className={activePage === 'marks' ? 'tab-button active' : 'tab-button'}
-              onClick={() => setActivePage('marks')}
-            >
-              Marks
-            </button>
+            <>
+              <button
+                type="button"
+                className={activePage === 'marks' ? 'tab-button active' : 'tab-button'}
+                onClick={() => setActivePage('marks')}
+              >
+                Marks
+              </button>
+              <button
+                type="button"
+                className={activePage === 'notifications' ? 'tab-button active' : 'tab-button'}
+                onClick={() => setActivePage('notifications')}
+              >
+                Notifications
+              </button>
+            </>
           ) : (
             <>
               <button
@@ -2327,7 +2356,7 @@ function App() {
                                   setError('')
                                   const response = await fetch(`${examApiPath}/${exam._id}`, {
                                     method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
+                                    headers: { 'Content-Type': 'application/json', ...authHeader },
                                     body: JSON.stringify({ ...exam, status: 'published' }),
                                   })
                                   const payload = await response.json()
@@ -2651,6 +2680,7 @@ function App() {
         <NotificationsPage
           exams={exams}
           students={students}
+          authToken={authToken}
         />
       ) : (
         <>

@@ -1,10 +1,15 @@
 import { Router } from 'express'
+import ClassStudent from '../models/ClassStudent.js'
 import Exam from '../models/Exam.js'
 import ExamMark from '../models/ExamMark.js'
 import ExamSubject from '../models/ExamSubject.js'
 import Student from '../models/Student.js'
+import TeacherSubject from '../models/TeacherSubject.js'
+import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
 
 const router = Router()
+router.use(requireAuth)
+router.use(authorizeRoles('admin', 'teacher'))
 
 const asTrimmedString = (value) =>
   typeof value === 'string' ? value.trim() : ''
@@ -66,9 +71,85 @@ const sendWhatsAppTextMessage = async ({
   return { ok: response.ok, status: response.status, payload }
 }
 
+const getTeacherMappings = async (teacherId) => {
+  return TeacherSubject.find({ teacher: teacherId })
+    .select({ className: 1, section: 1, subject: 1 })
+    .lean()
+}
+
+const getAllowedStudentIdsForTeacher = async (teacherId) => {
+  const teacherMappings = await getTeacherMappings(teacherId)
+  const uniqueClassKeys = Array.from(
+    new Set(teacherMappings.map((mapping) => `${mapping.className}__${mapping.section}`)),
+  )
+  if (!uniqueClassKeys.length) {
+    return []
+  }
+
+  const classQuery = uniqueClassKeys.map((classKey) => {
+    const [className, section] = classKey.split('__')
+    return { className, section }
+  })
+  const classStudents = await ClassStudent.find({
+    $or: classQuery,
+  })
+    .select({ student: 1 })
+    .lean()
+
+  return Array.from(new Set(classStudents.map((classStudent) => String(classStudent.student))))
+}
+
+const filterMarksForTeacher = async (teacherId, marks) => {
+  if (!marks.length) return []
+
+  const teacherMappings = await getTeacherMappings(teacherId)
+  const allowedTriples = new Set(
+    teacherMappings.map(
+      (mapping) => `${mapping.className}__${mapping.section}__${mapping.subject}`,
+    ),
+  )
+  if (!allowedTriples.size) return []
+
+  const studentIds = Array.from(
+    new Set(
+      marks.map((mark) =>
+        typeof mark.studentId === 'string' ? mark.studentId : String(mark.studentId?._id || ''),
+      ),
+    ),
+  ).filter(Boolean)
+  if (!studentIds.length) return []
+
+  const classStudents = await ClassStudent.find({
+    student: { $in: studentIds },
+  })
+    .select({ className: 1, section: 1, student: 1 })
+    .lean()
+  const classKeysByStudentId = new Map()
+  for (const classStudent of classStudents) {
+    const studentId = String(classStudent.student)
+    const classKey = `${classStudent.className}__${classStudent.section}`
+    const existing = classKeysByStudentId.get(studentId) || []
+    existing.push(classKey)
+    classKeysByStudentId.set(studentId, existing)
+  }
+
+  return marks.filter((mark) => {
+    const studentId =
+      typeof mark.studentId === 'string'
+        ? mark.studentId
+        : String(mark.studentId?._id || '')
+    const subjectId =
+      typeof mark.examSubjectId === 'string' ? '' : mark.examSubjectId?.subjectId || ''
+    if (!studentId || !subjectId) return false
+
+    const classKeys = classKeysByStudentId.get(studentId) || []
+    return classKeys.some((classKey) => allowedTriples.has(`${classKey}__${subjectId}`))
+  })
+}
+
 router.post('/whatsapp/parents', async (req, res) => {
   try {
-    const studentIds = asStringArray(req.body?.studentIds)
+    let studentIds = asStringArray(req.body?.studentIds)
     const message = asTrimmedString(req.body?.message)
 
     if (!studentIds.length) {
@@ -77,6 +158,14 @@ router.post('/whatsapp/parents', async (req, res) => {
 
     if (!message) {
       return res.status(400).json({ message: 'Message is required' })
+    }
+
+    if (req.user.role === 'teacher') {
+      const allowedStudentIds = new Set(await getAllowedStudentIdsForTeacher(req.user.id))
+      studentIds = studentIds.filter((studentId) => allowedStudentIds.has(studentId))
+      if (!studentIds.length) {
+        return res.status(403).json({ message: 'You are not allowed to notify selected students' })
+      }
     }
 
     const whatsappAccessToken = asTrimmedString(process.env.WHATSAPP_ACCESS_TOKEN)
@@ -221,11 +310,15 @@ router.post('/whatsapp/marks', async (req, res) => {
       markQuery.studentId = { $in: selectedStudentIds }
     }
 
-    const marks = await ExamMark.find(markQuery)
+    let marks = await ExamMark.find(markQuery)
       .populate('studentId', 'name rollNo fatherName fatherPhone')
       .populate('examSubjectId', 'subjectId totalMarks passingMarks')
       .sort({ updatedAt: -1 })
       .lean()
+
+    if (req.user.role === 'teacher') {
+      marks = await filterMarksForTeacher(req.user.id, marks)
+    }
 
     if (!marks.length) {
       return res.status(400).json({ message: 'No marks found for selected filters' })

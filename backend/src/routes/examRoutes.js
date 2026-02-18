@@ -3,8 +3,12 @@ import ClassModel from '../models/Class.js'
 import Exam from '../models/Exam.js'
 import ExamMark from '../models/ExamMark.js'
 import ExamSubject from '../models/ExamSubject.js'
+import TeacherSubject from '../models/TeacherSubject.js'
+import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
 
 const router = Router()
+router.use(requireAuth)
+router.use(authorizeRoles('admin', 'teacher'))
 
 const asTrimmedString = (value) =>
   typeof value === 'string' ? value.trim() : ''
@@ -121,6 +125,32 @@ const validateClassExists = async (exam) => {
   return null
 }
 
+const buildTeacherExamScopeQuery = async (teacherId) => {
+  const teacherMappings = await TeacherSubject.find({ teacher: teacherId })
+    .select({ className: 1, section: 1 })
+    .lean()
+  const uniqueClassKeys = Array.from(
+    new Set(teacherMappings.map((mapping) => `${mapping.className}__${mapping.section}`)),
+  )
+  if (!uniqueClassKeys.length) {
+    return null
+  }
+
+  return uniqueClassKeys.map((classKey) => {
+    const [classId, sectionId] = classKey.split('__')
+    return {
+      $or: [
+        {
+          examClasses: {
+            $elemMatch: { classId, sectionId },
+          },
+        },
+        { classId, sectionId },
+      ],
+    }
+  })
+}
+
 router.get('/', async (req, res) => {
   try {
     const query = {}
@@ -156,6 +186,19 @@ router.get('/', async (req, res) => {
       query.examName = { $regex: search, $options: 'i' }
     }
 
+    if (req.user.role === 'teacher') {
+      const teacherScopeOr = await buildTeacherExamScopeQuery(req.user.id)
+      if (!teacherScopeOr) {
+        return res.json({ data: [] })
+      }
+
+      if (query.$and) {
+        query.$and.push({ $or: teacherScopeOr })
+      } else {
+        query.$and = [{ $or: teacherScopeOr }]
+      }
+    }
+
     const exams = await Exam.find(query).sort({ createdAt: -1 }).lean()
     return res.json({ data: exams.map(normalizeExamOutput) })
   } catch (_error) {
@@ -164,6 +207,10 @@ router.get('/', async (req, res) => {
 })
 
 router.post('/', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const normalizedExam = normalizeExamInput(req.body)
     const validationError = validateExamInput(normalizedExam)
@@ -187,6 +234,10 @@ router.post('/', async (req, res) => {
 })
 
 router.put('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const normalizedExam = normalizeExamInput(req.body)
     const validationError = validateExamInput(normalizedExam)
@@ -218,6 +269,10 @@ router.put('/:id', async (req, res) => {
 })
 
 router.delete('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const exam = await Exam.findByIdAndDelete(req.params.id)
 

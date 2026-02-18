@@ -56,13 +56,14 @@ type SendResultRow = {
 type NotificationsPageProps = {
   exams: Exam[]
   students: Student[]
+  authToken: string
 }
 
 const examSubjectsApiPath = '/api/exam-subjects'
 const examMarksApiPath = '/api/exam-marks'
 const marksNotificationsApiPath = '/api/notifications/whatsapp/marks'
 
-function NotificationsPage({ exams, students }: NotificationsPageProps) {
+function NotificationsPage({ exams, students, authToken }: NotificationsPageProps) {
   const [selectedExamId, setSelectedExamId] = useState('')
   const [selectedExamSubjectId, setSelectedExamSubjectId] = useState('')
   const [search, setSearch] = useState('')
@@ -75,6 +76,10 @@ function NotificationsPage({ exams, students }: NotificationsPageProps) {
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
   const [sendResults, setSendResults] = useState<SendResultRow[]>([])
+  const authHeader = useMemo(
+    () => ({ Authorization: `Bearer ${authToken}` }),
+    [authToken],
+  )
 
   const studentById = useMemo(() => {
     return new Map(students.map((student) => [student._id, student]))
@@ -89,8 +94,12 @@ function NotificationsPage({ exams, students }: NotificationsPageProps) {
       setLoading(true)
       setError('')
       const [subjectsResponse, marksResponse] = await Promise.all([
-        fetch(`${examSubjectsApiPath}/exam/${examId}`),
-        fetch(`${examMarksApiPath}/exam/${examId}`),
+        fetch(`${examSubjectsApiPath}/exam/${examId}`, {
+          headers: authHeader,
+        }),
+        fetch(`${examMarksApiPath}/exam/${examId}`, {
+          headers: authHeader,
+        }),
       ])
       const subjectsPayload = await subjectsResponse.json()
       const marksPayload = await marksResponse.json()
@@ -216,7 +225,7 @@ function NotificationsPage({ exams, students }: NotificationsPageProps) {
 
       const response = await fetch(marksNotificationsApiPath, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify({
           examId: selectedExamId,
           examSubjectId: selectedExamSubjectId,

@@ -2,8 +2,12 @@ import { Router } from 'express'
 import ClassStudent from '../models/ClassStudent.js'
 import ExamMark from '../models/ExamMark.js'
 import Student from '../models/Student.js'
+import TeacherSubject from '../models/TeacherSubject.js'
+import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
 
 const router = Router()
+router.use(requireAuth)
+router.use(authorizeRoles('admin', 'teacher'))
 
 const phoneRegex = /^\d{10,15}$/
 const asTrimmedString = (value) =>
@@ -42,9 +46,45 @@ const validateStudentInput = (student) => {
   return null
 }
 
-router.get('/', async (_req, res) => {
+const getAllowedStudentIdsForTeacher = async (teacherId) => {
+  const teacherMappings = await TeacherSubject.find({ teacher: teacherId })
+    .select({ className: 1, section: 1 })
+    .lean()
+  if (!teacherMappings.length) {
+    return []
+  }
+
+  const classKeys = Array.from(
+    new Set(teacherMappings.map((mapping) => `${mapping.className}__${mapping.section}`)),
+  )
+  const classOrQuery = classKeys.map((classKey) => {
+    const [className, section] = classKey.split('__')
+    return { className, section }
+  })
+  const classStudents = await ClassStudent.find({
+    $or: classOrQuery,
+  })
+    .select({ student: 1 })
+    .lean()
+
+  return Array.from(new Set(classStudents.map((classStudent) => String(classStudent.student))))
+}
+
+router.get('/', async (req, res) => {
   try {
-    const students = await Student.find().sort({ createdAt: -1 }).lean()
+    let students = []
+
+    if (req.user.role === 'teacher') {
+      const allowedStudentIds = await getAllowedStudentIdsForTeacher(req.user.id)
+      students = allowedStudentIds.length
+        ? await Student.find({ _id: { $in: allowedStudentIds } })
+          .sort({ createdAt: -1 })
+          .lean()
+        : []
+    } else {
+      students = await Student.find().sort({ createdAt: -1 }).lean()
+    }
+
     return res.json({ data: students.map(normalizeStudentOutput) })
   } catch (error) {
     return res.status(500).json({ message: 'Failed to fetch students' })
@@ -52,6 +92,10 @@ router.get('/', async (_req, res) => {
 })
 
 router.post('/', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const normalizedStudent = normalizeStudentInput(req.body)
     const validationError = validateStudentInput(normalizedStudent)
@@ -70,6 +114,10 @@ router.post('/', async (req, res) => {
 })
 
 router.put('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const normalizedStudent = normalizeStudentInput(req.body)
     const validationError = validateStudentInput(normalizedStudent)
@@ -100,6 +148,10 @@ router.put('/:id', async (req, res) => {
 })
 
 router.delete('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const student = await Student.findByIdAndDelete(req.params.id)
 
