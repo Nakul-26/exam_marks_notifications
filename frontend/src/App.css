@@ -160,6 +160,21 @@ h2 {
   background: #ffffff;
 }
 
+.password-field {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.password-field input {
+  flex: 1;
+}
+
+.password-toggle {
+  white-space: nowrap;
+  min-width: 64px;
+}
+
 .field input:focus,
 .field select:focus,
 .search-wrap input:focus {

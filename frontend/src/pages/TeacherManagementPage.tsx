@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
 
 type Teacher = {
@@ -42,6 +43,8 @@ function TeacherManagementPage({
   startTeacherEdit,
   handleTeacherDelete,
 }: TeacherManagementPageProps) {
+  const [showPassword, setShowPassword] = useState(false)
+
   return (
     <>
       <section className="panel panel-compact">
@@ -104,19 +107,29 @@ function TeacherManagementPage({
           </label>
           <label className="field">
             <span>{isEditingTeacher ? 'Password (Optional)' : 'Password'}</span>
-            <input
-              type="password"
-              placeholder={
-                isEditingTeacher
-                  ? 'Leave empty to keep current password'
-                  : 'Set teacher password'
-              }
-              value={teacherForm.password}
-              onChange={(event) =>
-                setTeacherForm({ ...teacherForm, password: event.target.value })
-              }
-              required={!isEditingTeacher}
-            />
+            <div className="password-field">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder={
+                  isEditingTeacher
+                    ? 'Leave empty to keep current password'
+                    : 'Set teacher password'
+                }
+                value={teacherForm.password}
+                onChange={(event) =>
+                  setTeacherForm({ ...teacherForm, password: event.target.value })
+                }
+                required={!isEditingTeacher}
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowPassword((value) => !value)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
           </label>
 
           <div className="actions">

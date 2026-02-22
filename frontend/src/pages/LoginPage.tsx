@@ -17,6 +17,7 @@ const authApiPath = '/api/auth/login'
 function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -63,13 +64,23 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
           </label>
           <label className="field field-full">
             <span>Password</span>
-            <input
-              type="password"
-              placeholder="Enter password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
+            <div className="password-field">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Enter password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowPassword((value) => !value)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
           </label>
           <div className="actions">
             <button type="submit" className="primary" disabled={loading}>
@@ -80,6 +91,6 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
       </section>
     </main>
   )
-}
+} 
 
 export default LoginPage
