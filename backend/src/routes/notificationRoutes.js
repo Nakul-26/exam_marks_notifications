@@ -17,6 +17,16 @@ const asTrimmedString = (value) =>
 const asStringArray = (value) =>
   Array.isArray(value) ? value.map((item) => asTrimmedString(item)).filter(Boolean) : []
 
+const getFirstConfiguredEnv = (...keys) => {
+  for (const key of keys) {
+    const value = asTrimmedString(process.env[key])
+    if (value) {
+      return value
+    }
+  }
+  return ''
+}
+
 const normalizePhoneForWhatsApp = (rawPhone, defaultCountryCode) => {
   const trimmed = asTrimmedString(rawPhone)
   if (!trimmed) {
@@ -46,29 +56,92 @@ const sendWhatsAppTextMessage = async ({
   accessToken,
   apiVersion,
   recipient,
+  messageMode,
   message,
+  templateName,
+  templateLanguageCode,
 }) => {
-  const response = await fetch(
-    `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+  const isTemplateMessage = messageMode === 'template'
+  const requestBody = isTemplateMessage
+    ? {
+        messaging_product: 'whatsapp',
+        to: recipient,
+        type: 'template',
+        template: {
+          name: templateName,
+          language: {
+            code: templateLanguageCode,
+          },
+        },
+      }
+    : {
         messaging_product: 'whatsapp',
         to: recipient,
         type: 'text',
         text: {
           body: message,
         },
-      }),
-    },
-  )
+      }
+
+  const requestUrl = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`
+  // eslint-disable-next-line no-console
+  console.log('Meta request', {
+    url: requestUrl,
+    mode: messageMode,
+    to: recipient,
+    type: requestBody.type,
+    templateName: isTemplateMessage ? templateName : '',
+    templateLanguageCode: isTemplateMessage ? templateLanguageCode : '',
+    textLength: isTemplateMessage ? 0 : message.length,
+  })
+
+  let response
+  try {
+    response = await fetch(requestUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    })
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Meta network error', {
+      url: requestUrl,
+      message: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
 
   const payload = await response.json().catch(() => ({}))
+  // eslint-disable-next-line no-console
+  console.log('Meta response', {
+    ok: response.ok,
+    status: response.status,
+    payload,
+  })
   return { ok: response.ok, status: response.status, payload }
+}
+
+const getWhatsAppProviderError = (sendResult) => {
+  const errorObject = sendResult?.payload?.error || {}
+  const code =
+    errorObject.code !== undefined && errorObject.code !== null
+      ? `code ${errorObject.code}`
+      : ''
+  const subcode =
+    errorObject.error_subcode !== undefined && errorObject.error_subcode !== null
+      ? `subcode ${errorObject.error_subcode}`
+      : ''
+  const details = [code, subcode].filter(Boolean).join(', ')
+  const baseMessage = errorObject.message || 'Failed to send message'
+
+  if (details) {
+    return `${baseMessage} (${details})`
+  }
+
+  return baseMessage
 }
 
 const getTeacherMappings = async (teacherId) => {
@@ -168,10 +241,24 @@ router.post('/whatsapp/parents', async (req, res) => {
       }
     }
 
-    const whatsappAccessToken = asTrimmedString(process.env.WHATSAPP_ACCESS_TOKEN)
-    const whatsappPhoneNumberId = asTrimmedString(process.env.WHATSAPP_PHONE_NUMBER_ID)
+    const whatsappAccessToken = getFirstConfiguredEnv(
+      'WHATSAPP_ACCESS_TOKEN',
+      'META_ACCESS_TOKEN',
+    )
+    const whatsappPhoneNumberId = getFirstConfiguredEnv(
+      'WHATSAPP_PHONE_NUMBER_ID',
+      'META_PHONE_NUMBER_ID',
+    )
     const whatsappApiVersion =
-      asTrimmedString(process.env.WHATSAPP_API_VERSION) || 'v20.0'
+      getFirstConfiguredEnv('WHATSAPP_API_VERSION', 'META_API_VERSION') || 'v22.0'
+    const whatsappMessageMode =
+      getFirstConfiguredEnv('WHATSAPP_MESSAGE_MODE', 'META_MESSAGE_MODE') || 'text'
+    const whatsappTemplateName =
+      getFirstConfiguredEnv('WHATSAPP_TEMPLATE_NAME', 'META_TEMPLATE_NAME') ||
+      'hello_world'
+    const whatsappTemplateLanguageCode =
+      getFirstConfiguredEnv('WHATSAPP_TEMPLATE_LANGUAGE_CODE', 'META_TEMPLATE_LANGUAGE_CODE') ||
+      'en_US'
     const defaultCountryCode =
       asTrimmedString(process.env.WHATSAPP_DEFAULT_COUNTRY_CODE) || '91'
 
@@ -189,6 +276,15 @@ router.post('/whatsapp/parents', async (req, res) => {
 
     const results = []
     let sentCount = 0
+
+    // eslint-disable-next-line no-console
+    console.log('WhatsApp parents route triggered', {
+      totalStudents: studentIds.length,
+      mode: whatsappMessageMode,
+      apiVersion: whatsappApiVersion,
+      rawMode: asTrimmedString(process.env.WHATSAPP_MESSAGE_MODE),
+      rawMetaMode: asTrimmedString(process.env.META_MESSAGE_MODE),
+    })
 
     for (const studentId of studentIds) {
       const student = studentById.get(studentId)
@@ -226,7 +322,10 @@ router.post('/whatsapp/parents', async (req, res) => {
         accessToken: whatsappAccessToken,
         apiVersion: whatsappApiVersion,
         recipient: normalizedPhone,
+        messageMode: whatsappMessageMode,
         message,
+        templateName: whatsappTemplateName,
+        templateLanguageCode: whatsappTemplateLanguageCode,
       })
 
       if (sendResult.ok) {
@@ -240,7 +339,7 @@ router.post('/whatsapp/parents', async (req, res) => {
           error: '',
         })
       } else {
-        const providerError = sendResult?.payload?.error?.message || 'Failed to send message'
+        const providerError = getWhatsAppProviderError(sendResult)
         results.push({
           studentId,
           studentName: student.name || '',
@@ -260,7 +359,9 @@ router.post('/whatsapp/parents', async (req, res) => {
         results,
       },
     })
-  } catch (_error) {
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to send WhatsApp parent notifications', error)
     return res.status(500).json({ message: 'Failed to send WhatsApp notifications' })
   }
 })
@@ -276,10 +377,24 @@ router.post('/whatsapp/marks', async (req, res) => {
       return res.status(400).json({ message: 'Exam is required' })
     }
 
-    const whatsappAccessToken = asTrimmedString(process.env.WHATSAPP_ACCESS_TOKEN)
-    const whatsappPhoneNumberId = asTrimmedString(process.env.WHATSAPP_PHONE_NUMBER_ID)
+    const whatsappAccessToken = getFirstConfiguredEnv(
+      'WHATSAPP_ACCESS_TOKEN',
+      'META_ACCESS_TOKEN',
+    )
+    const whatsappPhoneNumberId = getFirstConfiguredEnv(
+      'WHATSAPP_PHONE_NUMBER_ID',
+      'META_PHONE_NUMBER_ID',
+    )
     const whatsappApiVersion =
-      asTrimmedString(process.env.WHATSAPP_API_VERSION) || 'v20.0'
+      getFirstConfiguredEnv('WHATSAPP_API_VERSION', 'META_API_VERSION') || 'v22.0'
+    const whatsappMessageMode =
+      getFirstConfiguredEnv('WHATSAPP_MESSAGE_MODE', 'META_MESSAGE_MODE') || 'text'
+    const whatsappTemplateName =
+      getFirstConfiguredEnv('WHATSAPP_TEMPLATE_NAME', 'META_TEMPLATE_NAME') ||
+      'hello_world'
+    const whatsappTemplateLanguageCode =
+      getFirstConfiguredEnv('WHATSAPP_TEMPLATE_LANGUAGE_CODE', 'META_TEMPLATE_LANGUAGE_CODE') ||
+      'en_US'
     const defaultCountryCode =
       asTrimmedString(process.env.WHATSAPP_DEFAULT_COUNTRY_CODE) || '91'
 
@@ -354,6 +469,15 @@ router.post('/whatsapp/marks', async (req, res) => {
     const results = []
     let sentCount = 0
 
+    // eslint-disable-next-line no-console
+    console.log('WhatsApp marks route triggered', {
+      recipients: marksByStudentId.size,
+      mode: whatsappMessageMode,
+      apiVersion: whatsappApiVersion,
+      rawMode: asTrimmedString(process.env.WHATSAPP_MESSAGE_MODE),
+      rawMetaMode: asTrimmedString(process.env.META_MESSAGE_MODE),
+    })
+
     for (const [, studentEntry] of marksByStudentId) {
       const normalizedPhone = normalizePhoneForWhatsApp(
         studentEntry.fatherPhone,
@@ -396,7 +520,10 @@ router.post('/whatsapp/marks', async (req, res) => {
         accessToken: whatsappAccessToken,
         apiVersion: whatsappApiVersion,
         recipient: normalizedPhone,
+        messageMode: whatsappMessageMode,
         message,
+        templateName: whatsappTemplateName,
+        templateLanguageCode: whatsappTemplateLanguageCode,
       })
 
       if (sendResult.ok) {
@@ -410,7 +537,7 @@ router.post('/whatsapp/marks', async (req, res) => {
           error: '',
         })
       } else {
-        const providerError = sendResult?.payload?.error?.message || 'Failed to send message'
+        const providerError = getWhatsAppProviderError(sendResult)
         results.push({
           studentId: studentEntry.studentId,
           studentName: studentEntry.studentName,
@@ -430,7 +557,9 @@ router.post('/whatsapp/marks', async (req, res) => {
         results,
       },
     })
-  } catch (_error) {
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to send WhatsApp marks notifications', error)
     return res.status(500).json({ message: 'Failed to send marks notifications' })
   }
 })
