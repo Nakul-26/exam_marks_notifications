@@ -54,6 +54,7 @@ const start = async () => {
   app.listen(port, () => {
     // eslint-disable-next-line no-console
     console.log(`Server running on http://localhost:${port}`)
+    console.log('Connected to MongoDB')
   })
 }
 
