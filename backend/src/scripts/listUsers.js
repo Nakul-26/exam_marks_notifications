@@ -2,6 +2,7 @@ import dotenv from 'dotenv'
 import mongoose from 'mongoose'
 import Admin from '../models/Admin.js'
 import Teacher from '../models/Teacher.js'
+import { getDefaultCollegeId } from '../utils/tenant.js'
 
 dotenv.config()
 
@@ -10,6 +11,7 @@ const asTrimmedString = (value) =>
 
 const start = async () => {
   const mongoUri = asTrimmedString(process.env.MONGO_URI)
+  const collegeId = asTrimmedString(process.env.COLLEGE_ID) || getDefaultCollegeId()
   if (!mongoUri) {
     throw new Error('MONGO_URI is required')
   }
@@ -18,18 +20,21 @@ const start = async () => {
 
   const [teachers, admins] = await Promise.all([
     Teacher.find()
+      .where({ collegeId })
       .sort({ createdAt: -1 })
-      .select('_id name email phone createdAt updatedAt')
+      .select('_id collegeId name email phone createdAt updatedAt')
       .lean(),
     Admin.find()
+      .where({ collegeId })
       .sort({ createdAt: -1 })
-      .select('_id name email createdAt updatedAt')
+      .select('_id collegeId name email createdAt updatedAt')
       .lean(),
   ])
 
   const teacherRows = teachers.map((teacher) => ({
     id: String(teacher._id),
     role: 'teacher',
+    collegeId: teacher.collegeId || '',
     name: teacher.name || '',
     email: teacher.email || '',
     phone: teacher.phone || '',
@@ -40,6 +45,7 @@ const start = async () => {
   const adminRows = admins.map((admin) => ({
     id: String(admin._id),
     role: 'admin',
+    collegeId: admin.collegeId || '',
     name: admin.name || 'Administrator',
     email: admin.email || '',
     phone: '',

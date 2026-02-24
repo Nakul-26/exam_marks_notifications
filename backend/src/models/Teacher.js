@@ -2,13 +2,17 @@ import mongoose from 'mongoose'
 
 const teacherSchema = new mongoose.Schema(
   {
+    collegeId: { type: String, required: true, trim: true, default: 'default', index: true },
     name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, trim: true, lowercase: true, unique: true },
-    phone: { type: String, required: true, trim: true, unique: true },
+    email: { type: String, required: true, trim: true, lowercase: true },
+    phone: { type: String, required: true, trim: true },
     passwordHash: { type: String, required: false, trim: true, select: false },
   },
   { timestamps: true },
 )
+
+teacherSchema.index({ collegeId: 1, email: 1 }, { unique: true })
+teacherSchema.index({ collegeId: 1, phone: 1 }, { unique: true })
 
 const Teacher = mongoose.model('Teacher', teacherSchema)
 

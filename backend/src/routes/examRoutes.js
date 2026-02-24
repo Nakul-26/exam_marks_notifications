@@ -5,6 +5,7 @@ import ExamMark from '../models/ExamMark.js'
 import ExamSubject from '../models/ExamSubject.js'
 import TeacherSubject from '../models/TeacherSubject.js'
 import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
+import { buildCollegeScope, injectCollegeId, withCollegeScope } from '../utils/tenant.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -104,12 +105,12 @@ const validateExamInput = (exam) => {
 }
 
 const validateClassExists = async (exam) => {
-  const classRecords = await ClassModel.find({
+  const classRecords = await ClassModel.find(withCollegeScope(exam.collegeId, {
     $or: exam.examClasses.map((examClass) => ({
       className: examClass.classId,
       section: examClass.sectionId,
     })),
-  })
+  }))
     .select({ className: 1, section: 1 })
     .lean()
 
@@ -125,8 +126,10 @@ const validateClassExists = async (exam) => {
   return null
 }
 
-const buildTeacherExamScopeQuery = async (teacherId) => {
-  const teacherMappings = await TeacherSubject.find({ teacher: teacherId })
+const buildTeacherExamScopeQuery = async (teacherId, collegeId) => {
+  const teacherMappings = await TeacherSubject.find(
+    withCollegeScope(collegeId, { teacher: teacherId }),
+  )
     .select({ className: 1, section: 1 })
     .lean()
   const uniqueClassKeys = Array.from(
@@ -153,7 +156,7 @@ const buildTeacherExamScopeQuery = async (teacherId) => {
 
 router.get('/', async (req, res) => {
   try {
-    const query = {}
+    const query = { $and: [buildCollegeScope(req.user.collegeId)] }
     const classId = asTrimmedString(req.query.classId)
     const sectionId = asTrimmedString(req.query.sectionId)
     const academicYear = asTrimmedString(req.query.academicYear)
@@ -161,42 +164,44 @@ router.get('/', async (req, res) => {
     const search = asTrimmedString(req.query.search)
 
     if (classId && sectionId) {
-      query.$or = [
+      query.$and.push({
+        $or: [
         {
           examClasses: {
             $elemMatch: { classId, sectionId },
           },
         },
         { classId, sectionId },
-      ]
+      ],
+      })
     } else if (classId) {
-      query.$or = [
+      query.$and.push({
+        $or: [
         { 'examClasses.classId': classId },
         { classId },
-      ]
+      ],
+      })
     } else if (sectionId) {
-      query.$or = [
+      query.$and.push({
+        $or: [
         { 'examClasses.sectionId': sectionId },
         { sectionId },
-      ]
+      ],
+      })
     }
-    if (academicYear) query.academicYear = academicYear
-    if (status) query.status = status
+    if (academicYear) query.$and.push({ academicYear })
+    if (status) query.$and.push({ status })
     if (search) {
-      query.examName = { $regex: search, $options: 'i' }
+      query.$and.push({ examName: { $regex: search, $options: 'i' } })
     }
 
     if (req.user.role === 'teacher') {
-      const teacherScopeOr = await buildTeacherExamScopeQuery(req.user.id)
+      const teacherScopeOr = await buildTeacherExamScopeQuery(req.user.id, req.user.collegeId)
       if (!teacherScopeOr) {
         return res.json({ data: [] })
       }
 
-      if (query.$and) {
-        query.$and.push({ $or: teacherScopeOr })
-      } else {
-        query.$and = [{ $or: teacherScopeOr }]
-      }
+      query.$and.push({ $or: teacherScopeOr })
     }
 
     const exams = await Exam.find(query).sort({ createdAt: -1 }).lean()
@@ -212,7 +217,7 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    const normalizedExam = normalizeExamInput(req.body)
+    const normalizedExam = injectCollegeId(req.user.collegeId, normalizeExamInput(req.body))
     const validationError = validateExamInput(normalizedExam)
     if (validationError) {
       return res.status(400).json({ message: validationError })
@@ -239,7 +244,7 @@ router.put('/:id', async (req, res) => {
   }
 
   try {
-    const normalizedExam = normalizeExamInput(req.body)
+    const normalizedExam = injectCollegeId(req.user.collegeId, normalizeExamInput(req.body))
     const validationError = validateExamInput(normalizedExam)
     if (validationError) {
       return res.status(400).json({ message: validationError })
@@ -250,10 +255,14 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ message: classValidationError })
     }
 
-    const exam = await Exam.findByIdAndUpdate(req.params.id, normalizedExam, {
-      new: true,
-      runValidators: true,
-    })
+    const exam = await Exam.findOneAndUpdate(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
+      normalizedExam,
+      {
+        new: true,
+        runValidators: true,
+      },
+    )
 
     if (!exam) {
       return res.status(404).json({ message: 'Exam not found' })
@@ -274,19 +283,23 @@ router.delete('/:id', async (req, res) => {
   }
 
   try {
-    const exam = await Exam.findByIdAndDelete(req.params.id)
+    const exam = await Exam.findOneAndDelete(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
+    )
 
     if (!exam) {
       return res.status(404).json({ message: 'Exam not found' })
     }
 
-    const examSubjects = await ExamSubject.find({ examId: req.params.id }).lean()
+    const examSubjects = await ExamSubject.find(
+      withCollegeScope(req.user.collegeId, { examId: req.params.id }),
+    ).lean()
     await Promise.all([
-      ExamSubject.deleteMany({ examId: req.params.id }),
-      ExamMark.deleteMany({ examId: req.params.id }),
-      ExamMark.deleteMany({
+      ExamSubject.deleteMany(withCollegeScope(req.user.collegeId, { examId: req.params.id })),
+      ExamMark.deleteMany(withCollegeScope(req.user.collegeId, { examId: req.params.id })),
+      ExamMark.deleteMany(withCollegeScope(req.user.collegeId, {
         examSubjectId: { $in: examSubjects.map((examSubject) => examSubject._id) },
-      }),
+      })),
     ])
     return res.json({ message: 'Exam deleted' })
   } catch (_error) {

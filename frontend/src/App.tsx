@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import './App.css'
 import ClassStudentManagementPage from './pages/ClassStudentManagementPage'
 import ClassSubjectManagementPage from './pages/ClassSubjectManagementPage'
+import AuditLogsPage from './pages/AuditLogsPage'
 import MarksManagementPage from './pages/MarksManagementPage'
 import NotificationsPage from './pages/NotificationsPage'
 import SubjectManagementPage from './pages/SubjectManagementPage'
@@ -447,6 +448,7 @@ function App() {
     | 'classStudents'
     | 'classes'
     | 'notifications'
+    | 'auditLogs'
   >('students')
 
   const [students, setStudents] = useState<Student[]>([])
@@ -1852,6 +1854,8 @@ function App() {
                       ? 'Class Student Mapping'
                       : activePage === 'notifications'
                         ? 'Parent Notifications'
+                        : activePage === 'auditLogs'
+                          ? 'Audit Logs'
                   : 'Class Management'}
           </h1>
           <p className="subtitle">
@@ -1877,6 +1881,8 @@ function App() {
                       ? 'Connect students to class-section combinations.'
                       : activePage === 'notifications'
                         ? 'Send WhatsApp notifications to parents.'
+                        : activePage === 'auditLogs'
+                          ? 'Review system activity and security events.'
                   : 'Create and manage class-section combinations.'}
           </p>
         </div>
@@ -1975,6 +1981,13 @@ function App() {
                 onClick={() => setActivePage('notifications')}
               >
                 Notifications
+              </button>
+              <button
+                type="button"
+                className={activePage === 'auditLogs' ? 'tab-button active' : 'tab-button'}
+                onClick={() => setActivePage('auditLogs')}
+              >
+                Audit Logs
               </button>
             </>
           )}
@@ -2682,6 +2695,8 @@ function App() {
           students={students}
           authToken={authToken}
         />
+      ) : activePage === 'auditLogs' ? (
+        <AuditLogsPage authToken={authToken} />
       ) : (
         <>
           <section className="panel panel-compact">

@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 
 const examMarkSchema = new mongoose.Schema(
   {
+    collegeId: { type: String, required: true, trim: true, default: 'default', index: true },
     examId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Exam',
@@ -34,7 +35,7 @@ const examMarkSchema = new mongoose.Schema(
   { timestamps: true },
 )
 
-examMarkSchema.index({ examSubjectId: 1, studentId: 1 }, { unique: true })
+examMarkSchema.index({ collegeId: 1, examSubjectId: 1, studentId: 1 }, { unique: true })
 
 const ExamMark = mongoose.model('ExamMark', examMarkSchema)
 

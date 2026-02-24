@@ -2,6 +2,7 @@ import dotenv from 'dotenv'
 import mongoose from 'mongoose'
 import Admin from '../models/Admin.js'
 import { hashPassword } from '../utils/auth.js'
+import { getDefaultCollegeId } from '../utils/tenant.js'
 
 dotenv.config()
 
@@ -17,7 +18,7 @@ const readArgValue = (name) => {
 const printUsage = () => {
   // eslint-disable-next-line no-console
   console.log(
-    'Usage: npm run users:create-admin -- --name "Admin Name" --email admin@example.com --password NewPass123',
+    'Usage: npm run users:create-admin -- --name "Admin Name" --email admin@example.com --password NewPass123 [--collegeId default]',
   )
 }
 
@@ -30,6 +31,7 @@ const start = async () => {
   const name = readArgValue('--name')
   const email = readArgValue('--email').toLowerCase()
   const password = readArgValue('--password')
+  const collegeId = readArgValue('--collegeId') || getDefaultCollegeId()
 
   if (!name || !email || !password) {
     printUsage()
@@ -39,12 +41,13 @@ const start = async () => {
 
   await mongoose.connect(mongoUri)
 
-  const existing = await Admin.findOne({ email }).lean()
+  const existing = await Admin.findOne({ email, collegeId }).lean()
   if (existing) {
     throw new Error('Admin with this email already exists')
   }
 
   const admin = await Admin.create({
+    collegeId,
     name,
     email,
     passwordHash: hashPassword(password),

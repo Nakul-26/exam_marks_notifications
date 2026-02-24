@@ -1,9 +1,13 @@
 import { Router } from 'express'
 import ClassModel from '../models/Class.js'
 import ClassSubject from '../models/ClassSubject.js'
+import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
 import Subject from '../models/Subject.js'
+import { injectCollegeId, withCollegeScope } from '../utils/tenant.js'
 
 const router = Router()
+router.use(requireAuth)
+router.use(authorizeRoles('admin', 'teacher'))
 
 const asTrimmedString = (value) =>
   typeof value === 'string' ? value.trim() : ''
@@ -25,11 +29,11 @@ const validateClassSubjectInput = (classSubject) => {
 
 const validateClassAndSubjectExist = async (classSubject) => {
   const [classRecord, subjectRecord] = await Promise.all([
-    ClassModel.findOne({
+    ClassModel.findOne(withCollegeScope(classSubject.collegeId, {
       className: classSubject.className,
       section: classSubject.section,
-    }).lean(),
-    Subject.findOne({ name: classSubject.subject }).lean(),
+    })).lean(),
+    Subject.findOne(withCollegeScope(classSubject.collegeId, { name: classSubject.subject })).lean(),
   ])
 
   if (!classRecord) {
@@ -43,9 +47,9 @@ const validateClassAndSubjectExist = async (classSubject) => {
   return null
 }
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const classSubjects = await ClassSubject.find()
+    const classSubjects = await ClassSubject.find(withCollegeScope(req.user.collegeId))
       .sort({ className: 1, section: 1, subject: 1, createdAt: -1 })
       .lean()
     return res.json({ data: classSubjects })
@@ -55,8 +59,15 @@ router.get('/', async (_req, res) => {
 })
 
 router.post('/', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
-    const normalizedClassSubject = normalizeClassSubjectInput(req.body)
+    const normalizedClassSubject = injectCollegeId(
+      req.user.collegeId,
+      normalizeClassSubjectInput(req.body),
+    )
     const validationError = validateClassSubjectInput(normalizedClassSubject)
     if (validationError) {
       return res.status(400).json({ message: validationError })
@@ -79,8 +90,15 @@ router.post('/', async (req, res) => {
 })
 
 router.put('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
-    const normalizedClassSubject = normalizeClassSubjectInput(req.body)
+    const normalizedClassSubject = injectCollegeId(
+      req.user.collegeId,
+      normalizeClassSubjectInput(req.body),
+    )
     const validationError = validateClassSubjectInput(normalizedClassSubject)
     if (validationError) {
       return res.status(400).json({ message: validationError })
@@ -92,8 +110,8 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ message: lookupValidationError })
     }
 
-    const classSubject = await ClassSubject.findByIdAndUpdate(
-      req.params.id,
+    const classSubject = await ClassSubject.findOneAndUpdate(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
       normalizedClassSubject,
       {
         new: true,
@@ -115,8 +133,14 @@ router.put('/:id', async (req, res) => {
 })
 
 router.delete('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
-    const classSubject = await ClassSubject.findByIdAndDelete(req.params.id)
+    const classSubject = await ClassSubject.findOneAndDelete(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
+    )
 
     if (!classSubject) {
       return res.status(404).json({ message: 'Mapping not found' })

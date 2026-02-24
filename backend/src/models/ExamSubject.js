@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 
 const examSubjectSchema = new mongoose.Schema(
   {
+    collegeId: { type: String, required: true, trim: true, default: 'default', index: true },
     examId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Exam',
@@ -17,7 +18,7 @@ const examSubjectSchema = new mongoose.Schema(
   { timestamps: true },
 )
 
-examSubjectSchema.index({ examId: 1, subjectId: 1 }, { unique: true })
+examSubjectSchema.index({ collegeId: 1, examId: 1, subjectId: 1 }, { unique: true })
 
 const ExamSubject = mongoose.model('ExamSubject', examSubjectSchema)
 

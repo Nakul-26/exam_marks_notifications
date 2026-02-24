@@ -5,6 +5,7 @@ import ExamMark from '../models/ExamMark.js'
 import ExamSubject from '../models/ExamSubject.js'
 import TeacherSubject from '../models/TeacherSubject.js'
 import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
+import { injectCollegeId, withCollegeScope } from '../utils/tenant.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -45,7 +46,9 @@ const validateExamSubjectInput = (examSubject) => {
 }
 
 const validateExamAndSubjectMapping = async (examSubject) => {
-  const exam = await Exam.findById(examSubject.examId).lean()
+  const exam = await Exam.findOne(
+    withCollegeScope(examSubject.collegeId, { _id: examSubject.examId }),
+  ).lean()
   if (!exam) {
     return { message: 'Exam not found' }
   }
@@ -60,13 +63,13 @@ const validateExamAndSubjectMapping = async (examSubject) => {
     return { message: 'Exam does not have any class-section mapping' }
   }
 
-  const classSubject = await ClassSubject.findOne({
+  const classSubject = await ClassSubject.findOne(withCollegeScope(examSubject.collegeId, {
     subject: examSubject.subjectId,
     $or: examClasses.map((examClass) => ({
       className: examClass.classId,
       section: examClass.sectionId,
     })),
-  }).lean()
+  })).lean()
 
   if (!classSubject) {
     const classLabel = examClasses.map((examClass) => `${examClass.classId}-${examClass.sectionId}`).join(', ')
@@ -80,10 +83,12 @@ const validateExamAndSubjectMapping = async (examSubject) => {
 
 router.get('/exam/:examId', async (req, res) => {
   try {
-    const query = { examId: req.params.examId }
+    const query = withCollegeScope(req.user.collegeId, { examId: req.params.examId })
 
     if (req.user.role === 'teacher') {
-      const exam = await Exam.findById(req.params.examId).lean()
+      const exam = await Exam.findOne(
+        withCollegeScope(req.user.collegeId, { _id: req.params.examId }),
+      ).lean()
       if (!exam) {
         return res.status(404).json({ message: 'Exam not found' })
       }
@@ -98,7 +103,9 @@ router.get('/exam/:examId', async (req, res) => {
         return res.json({ data: [] })
       }
 
-      const teacherMappings = await TeacherSubject.find({ teacher: req.user.id })
+      const teacherMappings = await TeacherSubject.find(
+        withCollegeScope(req.user.collegeId, { teacher: req.user.id }),
+      )
         .select({ className: 1, section: 1, subject: 1 })
         .lean()
       const examClassKeys = new Set(
@@ -136,7 +143,10 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    const normalizedExamSubject = normalizeExamSubjectInput(req.body)
+    const normalizedExamSubject = injectCollegeId(
+      req.user.collegeId,
+      normalizeExamSubjectInput(req.body),
+    )
     const validationError = validateExamSubjectInput(normalizedExamSubject)
     if (validationError) {
       return res.status(400).json({ message: validationError })
@@ -163,7 +173,10 @@ router.put('/:id', async (req, res) => {
   }
 
   try {
-    const normalizedExamSubject = normalizeExamSubjectInput(req.body)
+    const normalizedExamSubject = injectCollegeId(
+      req.user.collegeId,
+      normalizeExamSubjectInput(req.body),
+    )
     const validationError = validateExamSubjectInput(normalizedExamSubject)
     if (validationError) {
       return res.status(400).json({ message: validationError })
@@ -174,8 +187,8 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ message: mappingValidation.message })
     }
 
-    const examSubject = await ExamSubject.findByIdAndUpdate(
-      req.params.id,
+    const examSubject = await ExamSubject.findOneAndUpdate(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
       normalizedExamSubject,
       {
         new: true,
@@ -202,13 +215,17 @@ router.delete('/:id', async (req, res) => {
   }
 
   try {
-    const examSubject = await ExamSubject.findByIdAndDelete(req.params.id)
+    const examSubject = await ExamSubject.findOneAndDelete(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
+    )
 
     if (!examSubject) {
       return res.status(404).json({ message: 'Exam subject not found' })
     }
 
-    await ExamMark.deleteMany({ examSubjectId: examSubject._id })
+    await ExamMark.deleteMany(
+      withCollegeScope(req.user.collegeId, { examSubjectId: examSubject._id }),
+    )
 
     return res.json({ message: 'Exam subject deleted' })
   } catch (_error) {

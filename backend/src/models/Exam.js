@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 
 const examSchema = new mongoose.Schema(
   {
+    collegeId: { type: String, required: true, trim: true, default: 'default', index: true },
     examName: { type: String, required: true, trim: true },
     examClasses: [
       {
@@ -24,9 +25,9 @@ const examSchema = new mongoose.Schema(
   { timestamps: true },
 )
 
-examSchema.index({ classId: 1, sectionId: 1, academicYear: 1 })
-examSchema.index({ 'examClasses.classId': 1, 'examClasses.sectionId': 1, academicYear: 1 })
-examSchema.index({ examName: 1, classId: 1, sectionId: 1, academicYear: 1 }, { unique: true })
+examSchema.index({ collegeId: 1, classId: 1, sectionId: 1, academicYear: 1 })
+examSchema.index({ collegeId: 1, 'examClasses.classId': 1, 'examClasses.sectionId': 1, academicYear: 1 })
+examSchema.index({ collegeId: 1, examName: 1, classId: 1, sectionId: 1, academicYear: 1 }, { unique: true })
 
 const Exam = mongoose.model('Exam', examSchema)
 

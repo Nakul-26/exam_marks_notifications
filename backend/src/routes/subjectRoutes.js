@@ -1,9 +1,13 @@
 import { Router } from 'express'
 import ClassSubject from '../models/ClassSubject.js'
+import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
 import Subject from '../models/Subject.js'
 import TeacherSubject from '../models/TeacherSubject.js'
+import { injectCollegeId, withCollegeScope } from '../utils/tenant.js'
 
 const router = Router()
+router.use(requireAuth)
+router.use(authorizeRoles('admin', 'teacher'))
 
 const asTrimmedString = (value) =>
   typeof value === 'string' ? value.trim() : ''
@@ -19,9 +23,11 @@ const validateSubjectInput = (subject) => {
   return null
 }
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const subjects = await Subject.find().sort({ name: 1, createdAt: -1 }).lean()
+    const subjects = await Subject.find(withCollegeScope(req.user.collegeId))
+      .sort({ name: 1, createdAt: -1 })
+      .lean()
     return res.json({ data: subjects })
   } catch (_error) {
     return res.status(500).json({ message: 'Failed to fetch subjects' })
@@ -29,6 +35,10 @@ router.get('/', async (_req, res) => {
 })
 
 router.post('/', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const normalizedSubject = normalizeSubjectInput(req.body)
     const validationError = validateSubjectInput(normalizedSubject)
@@ -36,7 +46,9 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: validationError })
     }
 
-    const subject = await Subject.create(normalizedSubject)
+    const subject = await Subject.create(
+      injectCollegeId(req.user.collegeId, normalizedSubject),
+    )
     return res.status(201).json({ data: subject })
   } catch (error) {
     if (error.code === 11000) {
@@ -47,6 +59,10 @@ router.post('/', async (req, res) => {
 })
 
 router.put('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const normalizedSubject = normalizeSubjectInput(req.body)
     const validationError = validateSubjectInput(normalizedSubject)
@@ -54,7 +70,9 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ message: validationError })
     }
 
-    const existingSubject = await Subject.findById(req.params.id)
+    const existingSubject = await Subject.findOne(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
+    )
 
     if (!existingSubject) {
       return res.status(404).json({ message: 'Subject not found' })
@@ -67,11 +85,11 @@ router.put('/:id', async (req, res) => {
     if (previousName !== subject.name) {
       await Promise.all([
         ClassSubject.updateMany(
-          { subject: previousName },
+          withCollegeScope(req.user.collegeId, { subject: previousName }),
           { $set: { subject: subject.name } },
         ),
         TeacherSubject.updateMany(
-          { subject: previousName },
+          withCollegeScope(req.user.collegeId, { subject: previousName }),
           { $set: { subject: subject.name } },
         ),
       ])
@@ -87,16 +105,22 @@ router.put('/:id', async (req, res) => {
 })
 
 router.delete('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
-    const subject = await Subject.findByIdAndDelete(req.params.id)
+    const subject = await Subject.findOneAndDelete(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
+    )
 
     if (!subject) {
       return res.status(404).json({ message: 'Subject not found' })
     }
 
     await Promise.all([
-      ClassSubject.deleteMany({ subject: subject.name }),
-      TeacherSubject.deleteMany({ subject: subject.name }),
+      ClassSubject.deleteMany(withCollegeScope(req.user.collegeId, { subject: subject.name })),
+      TeacherSubject.deleteMany(withCollegeScope(req.user.collegeId, { subject: subject.name })),
     ])
 
     return res.json({ message: 'Subject deleted' })

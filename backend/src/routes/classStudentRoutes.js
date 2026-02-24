@@ -4,6 +4,7 @@ import ClassStudent from '../models/ClassStudent.js'
 import Student from '../models/Student.js'
 import TeacherSubject from '../models/TeacherSubject.js'
 import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
+import { injectCollegeId, withCollegeScope } from '../utils/tenant.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -29,11 +30,13 @@ const validateClassStudentInput = (classStudent) => {
 
 const validateClassAndStudentExist = async (classStudent) => {
   const [classRecord, studentRecord] = await Promise.all([
-    ClassModel.findOne({
+    ClassModel.findOne(withCollegeScope(classStudent.collegeId, {
       className: classStudent.className,
       section: classStudent.section,
-    }).lean(),
-    Student.findById(classStudent.student).lean(),
+    })).lean(),
+    Student.findOne(
+      withCollegeScope(classStudent.collegeId, { _id: classStudent.student }),
+    ).lean(),
   ])
 
   if (!classRecord) {
@@ -59,8 +62,10 @@ const normalizeClassStudentOutput = (classStudent) => {
   }
 }
 
-const getTeacherClassQuery = async (teacherId) => {
-  const teacherMappings = await TeacherSubject.find({ teacher: teacherId })
+const getTeacherClassQuery = async (teacherId, collegeId) => {
+  const teacherMappings = await TeacherSubject.find(
+    withCollegeScope(collegeId, { teacher: teacherId }),
+  )
     .select({ className: 1, section: 1 })
     .lean()
   const uniqueClassKeys = Array.from(
@@ -77,15 +82,15 @@ router.get('/', async (req, res) => {
     let classStudents = []
 
     if (req.user.role === 'teacher') {
-      const classQuery = await getTeacherClassQuery(req.user.id)
+      const classQuery = await getTeacherClassQuery(req.user.id, req.user.collegeId)
       classStudents = classQuery.length
-        ? await ClassStudent.find({ $or: classQuery })
+        ? await ClassStudent.find(withCollegeScope(req.user.collegeId, { $or: classQuery }))
           .populate('student', 'name rollNo')
           .sort({ className: 1, section: 1, createdAt: -1 })
           .lean()
         : []
     } else {
-      classStudents = await ClassStudent.find()
+      classStudents = await ClassStudent.find(withCollegeScope(req.user.collegeId))
       .populate('student', 'name rollNo')
       .sort({ className: 1, section: 1, createdAt: -1 })
       .lean()
@@ -103,7 +108,10 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    const normalizedClassStudent = normalizeClassStudentInput(req.body)
+    const normalizedClassStudent = injectCollegeId(
+      req.user.collegeId,
+      normalizeClassStudentInput(req.body),
+    )
     const validationError = validateClassStudentInput(normalizedClassStudent)
     if (validationError) {
       return res.status(400).json({ message: validationError })
@@ -131,7 +139,10 @@ router.put('/:id', async (req, res) => {
   }
 
   try {
-    const normalizedClassStudent = normalizeClassStudentInput(req.body)
+    const normalizedClassStudent = injectCollegeId(
+      req.user.collegeId,
+      normalizeClassStudentInput(req.body),
+    )
     const validationError = validateClassStudentInput(normalizedClassStudent)
     if (validationError) {
       return res.status(400).json({ message: validationError })
@@ -143,8 +154,8 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ message: lookupValidationError })
     }
 
-    const classStudent = await ClassStudent.findByIdAndUpdate(
-      req.params.id,
+    const classStudent = await ClassStudent.findOneAndUpdate(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
       normalizedClassStudent,
       {
         new: true,
@@ -171,7 +182,9 @@ router.delete('/:id', async (req, res) => {
   }
 
   try {
-    const classStudent = await ClassStudent.findByIdAndDelete(req.params.id)
+    const classStudent = await ClassStudent.findOneAndDelete(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
+    )
 
     if (!classStudent) {
       return res.status(404).json({ message: 'Mapping not found' })

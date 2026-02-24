@@ -1,9 +1,13 @@
 import { Router } from 'express'
 import Teacher from '../models/Teacher.js'
 import TeacherSubject from '../models/TeacherSubject.js'
+import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
 import { hashPassword } from '../utils/auth.js'
+import { injectCollegeId, withCollegeScope } from '../utils/tenant.js'
 
 const router = Router()
+router.use(requireAuth)
+router.use(authorizeRoles('admin', 'teacher'))
 
 const phoneRegex = /^\d{10,15}$/
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -46,7 +50,9 @@ const sanitizeTeacher = (teacher) => {
 
 router.get('/', async (_req, res) => {
   try {
-    const teachers = await Teacher.find().sort({ createdAt: -1 }).lean()
+    const teachers = await Teacher.find(withCollegeScope(_req.user.collegeId))
+      .sort({ createdAt: -1 })
+      .lean()
     return res.json({ data: teachers.map(sanitizeTeacher) })
   } catch (_error) {
     return res.status(500).json({ message: 'Failed to fetch teachers' })
@@ -54,6 +60,10 @@ router.get('/', async (_req, res) => {
 })
 
 router.post('/', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const normalizedTeacher = normalizeTeacherInput(req.body)
     const validationError = validateTeacherInput(normalizedTeacher)
@@ -61,12 +71,12 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: validationError })
     }
 
-    const teacher = await Teacher.create({
+    const teacher = await Teacher.create(injectCollegeId(req.user.collegeId, {
       name: normalizedTeacher.name,
       email: normalizedTeacher.email,
       phone: normalizedTeacher.phone,
       passwordHash: hashPassword(normalizedTeacher.password),
-    })
+    }))
     return res.status(201).json({ data: sanitizeTeacher(teacher.toObject()) })
   } catch (error) {
     if (error.code === 11000) {
@@ -83,6 +93,10 @@ router.post('/', async (req, res) => {
 })
 
 router.put('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
     const normalizedTeacher = normalizeTeacherInput(req.body)
     const validationError = validateTeacherInput(normalizedTeacher, true)
@@ -90,7 +104,9 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ message: validationError })
     }
 
-    const existingTeacher = await Teacher.findById(req.params.id)
+    const existingTeacher = await Teacher.findOne(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
+    )
 
     if (!existingTeacher) {
       return res.status(404).json({ message: 'Teacher not found' })
@@ -107,7 +123,7 @@ router.put('/:id', async (req, res) => {
 
     if (teacher.name !== previousName) {
       await TeacherSubject.updateMany(
-        { teacher: teacher._id },
+        withCollegeScope(req.user.collegeId, { teacher: teacher._id }),
         { $set: { teacherName: teacher.name } },
       )
     }
@@ -128,12 +144,20 @@ router.put('/:id', async (req, res) => {
 })
 
 router.delete('/:id', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
   try {
-    const teacher = await Teacher.findByIdAndDelete(req.params.id)
+    const teacher = await Teacher.findOneAndDelete(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
+    )
     if (!teacher) {
       return res.status(404).json({ message: 'Teacher not found' })
     }
-    await TeacherSubject.deleteMany({ teacher: teacher._id })
+    await TeacherSubject.deleteMany(
+      withCollegeScope(req.user.collegeId, { teacher: teacher._id }),
+    )
     return res.json({ message: 'Teacher deleted' })
   } catch (_error) {
     return res.status(400).json({ message: 'Failed to delete teacher' })

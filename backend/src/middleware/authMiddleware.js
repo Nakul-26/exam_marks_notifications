@@ -1,4 +1,5 @@
 import { verifyToken } from '../utils/auth.js'
+import { getDefaultCollegeId } from '../utils/tenant.js'
 
 const getBearerToken = (authorizationHeader) => {
   if (typeof authorizationHeader !== 'string') return ''
@@ -20,6 +21,7 @@ export const requireAuth = (req, res, next) => {
       role: String(payload.role || ''),
       name: String(payload.name || ''),
       email: String(payload.email || ''),
+      collegeId: String(payload.collegeId || getDefaultCollegeId()),
     }
 
     if (!req.user.id || !req.user.role) {

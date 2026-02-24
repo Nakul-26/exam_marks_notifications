@@ -4,6 +4,7 @@ import ExamMark from '../models/ExamMark.js'
 import Student from '../models/Student.js'
 import TeacherSubject from '../models/TeacherSubject.js'
 import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
+import { injectCollegeId, withCollegeScope } from '../utils/tenant.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -46,8 +47,10 @@ const validateStudentInput = (student) => {
   return null
 }
 
-const getAllowedStudentIdsForTeacher = async (teacherId) => {
-  const teacherMappings = await TeacherSubject.find({ teacher: teacherId })
+const getAllowedStudentIdsForTeacher = async (teacherId, collegeId) => {
+  const teacherMappings = await TeacherSubject.find(
+    withCollegeScope(collegeId, { teacher: teacherId }),
+  )
     .select({ className: 1, section: 1 })
     .lean()
   if (!teacherMappings.length) {
@@ -61,9 +64,11 @@ const getAllowedStudentIdsForTeacher = async (teacherId) => {
     const [className, section] = classKey.split('__')
     return { className, section }
   })
-  const classStudents = await ClassStudent.find({
-    $or: classOrQuery,
-  })
+  const classStudents = await ClassStudent.find(
+    withCollegeScope(collegeId, {
+      $or: classOrQuery,
+    }),
+  )
     .select({ student: 1 })
     .lean()
 
@@ -75,14 +80,21 @@ router.get('/', async (req, res) => {
     let students = []
 
     if (req.user.role === 'teacher') {
-      const allowedStudentIds = await getAllowedStudentIdsForTeacher(req.user.id)
+      const allowedStudentIds = await getAllowedStudentIdsForTeacher(
+        req.user.id,
+        req.user.collegeId,
+      )
       students = allowedStudentIds.length
-        ? await Student.find({ _id: { $in: allowedStudentIds } })
+        ? await Student.find(
+          withCollegeScope(req.user.collegeId, { _id: { $in: allowedStudentIds } }),
+        )
           .sort({ createdAt: -1 })
           .lean()
         : []
     } else {
-      students = await Student.find().sort({ createdAt: -1 }).lean()
+      students = await Student.find(withCollegeScope(req.user.collegeId))
+        .sort({ createdAt: -1 })
+        .lean()
     }
 
     return res.json({ data: students.map(normalizeStudentOutput) })
@@ -97,7 +109,10 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    const normalizedStudent = normalizeStudentInput(req.body)
+    const normalizedStudent = injectCollegeId(
+      req.user.collegeId,
+      normalizeStudentInput(req.body),
+    )
     const validationError = validateStudentInput(normalizedStudent)
     if (validationError) {
       return res.status(400).json({ message: validationError })
@@ -119,14 +134,17 @@ router.put('/:id', async (req, res) => {
   }
 
   try {
-    const normalizedStudent = normalizeStudentInput(req.body)
+    const normalizedStudent = injectCollegeId(
+      req.user.collegeId,
+      normalizeStudentInput(req.body),
+    )
     const validationError = validateStudentInput(normalizedStudent)
     if (validationError) {
       return res.status(400).json({ message: validationError })
     }
 
-    const student = await Student.findByIdAndUpdate(
-      req.params.id,
+    const student = await Student.findOneAndUpdate(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
       normalizedStudent,
       {
         new: true,
@@ -153,14 +171,18 @@ router.delete('/:id', async (req, res) => {
   }
 
   try {
-    const student = await Student.findByIdAndDelete(req.params.id)
+    const student = await Student.findOneAndDelete(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
+    )
 
     if (!student) {
       return res.status(404).json({ message: 'Student not found' })
     }
 
-    await ClassStudent.deleteMany({ student: student._id })
-    await ExamMark.deleteMany({ studentId: student._id })
+    await ClassStudent.deleteMany(
+      withCollegeScope(req.user.collegeId, { student: student._id }),
+    )
+    await ExamMark.deleteMany(withCollegeScope(req.user.collegeId, { studentId: student._id }))
 
     return res.json({ message: 'Student deleted' })
   } catch (error) {

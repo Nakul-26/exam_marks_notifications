@@ -3,6 +3,7 @@ import Admin from '../models/Admin.js'
 import Teacher from '../models/Teacher.js'
 import { requireAuth } from '../middleware/authMiddleware.js'
 import { signToken, verifyPassword } from '../utils/auth.js'
+import { buildCollegeScope, getDefaultCollegeId } from '../utils/tenant.js'
 
 const router = Router()
 
@@ -19,6 +20,7 @@ const normalizeLoginInput = (payload = {}) => {
 const sanitizeTeacher = (teacherDoc) => {
   return {
     _id: String(teacherDoc._id),
+    collegeId: teacherDoc.collegeId || getDefaultCollegeId(),
     name: teacherDoc.name || '',
     email: teacherDoc.email || '',
     phone: teacherDoc.phone || '',
@@ -28,6 +30,7 @@ const sanitizeTeacher = (teacherDoc) => {
 const sanitizeAdmin = (adminDoc) => {
   return {
     _id: String(adminDoc._id),
+    collegeId: adminDoc.collegeId || getDefaultCollegeId(),
     name: adminDoc.name || 'Administrator',
     email: adminDoc.email || '',
   }
@@ -43,6 +46,7 @@ const logSuccessfulLogin = (role, user) => {
 router.post('/login', async (req, res) => {
   try {
     const credentials = normalizeLoginInput(req.body)
+    const collegeId = asTrimmedString(req.body?.collegeId) || getDefaultCollegeId()
     if (!credentials.email) {
       return res.status(400).json({ message: 'Email is required' })
     }
@@ -50,7 +54,10 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Password is required' })
     }
 
-    const admin = await Admin.findOne({ email: credentials.email })
+    const admin = await Admin.findOne({
+      email: credentials.email,
+      ...buildCollegeScope(collegeId),
+    })
       .select('+passwordHash')
       .lean()
     if (admin?.passwordHash) {
@@ -65,6 +72,7 @@ router.post('/login', async (req, res) => {
         role: 'admin',
         name: safeAdmin.name,
         email: safeAdmin.email,
+        collegeId: safeAdmin.collegeId,
       })
       logSuccessfulLogin('admin', safeAdmin)
 
@@ -76,12 +84,16 @@ router.post('/login', async (req, res) => {
             role: 'admin',
             name: safeAdmin.name,
             email: safeAdmin.email,
+            collegeId: safeAdmin.collegeId,
           },
         },
       })
     }
 
-    const teacher = await Teacher.findOne({ email: credentials.email })
+    const teacher = await Teacher.findOne({
+      email: credentials.email,
+      ...buildCollegeScope(collegeId),
+    })
       .select('+passwordHash')
       .lean()
     if (teacher?.passwordHash) {
@@ -96,6 +108,7 @@ router.post('/login', async (req, res) => {
         role: 'teacher',
         name: safeTeacher.name,
         email: safeTeacher.email,
+        collegeId: safeTeacher.collegeId,
       })
       logSuccessfulLogin('teacher', safeTeacher)
 
@@ -107,6 +120,7 @@ router.post('/login', async (req, res) => {
             role: 'teacher',
             name: safeTeacher.name,
             email: safeTeacher.email,
+            collegeId: safeTeacher.collegeId,
           },
         },
       })
@@ -120,7 +134,10 @@ router.post('/login', async (req, res) => {
 
 router.get('/me', requireAuth, async (req, res) => {
   if (req.user.role === 'admin') {
-    const admin = await Admin.findById(req.user.id).lean()
+    const admin = await Admin.findOne({
+      _id: req.user.id,
+      ...buildCollegeScope(req.user.collegeId),
+    }).lean()
     if (!admin) {
       return res.status(401).json({ message: 'User not found' })
     }
@@ -132,11 +149,15 @@ router.get('/me', requireAuth, async (req, res) => {
         role: 'admin',
         name: safeAdmin.name,
         email: safeAdmin.email,
+        collegeId: safeAdmin.collegeId,
       },
     })
   }
 
-  const teacher = await Teacher.findById(req.user.id).lean()
+  const teacher = await Teacher.findOne({
+    _id: req.user.id,
+    ...buildCollegeScope(req.user.collegeId),
+  }).lean()
   if (!teacher) {
     return res.status(401).json({ message: 'User not found' })
   }
@@ -148,6 +169,7 @@ router.get('/me', requireAuth, async (req, res) => {
       role: 'teacher',
       name: safeTeacher.name,
       email: safeTeacher.email,
+      collegeId: safeTeacher.collegeId,
     },
   })
 })

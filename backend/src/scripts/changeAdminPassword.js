@@ -2,6 +2,7 @@ import dotenv from 'dotenv'
 import mongoose from 'mongoose'
 import Admin from '../models/Admin.js'
 import { hashPassword } from '../utils/auth.js'
+import { getDefaultCollegeId } from '../utils/tenant.js'
 
 dotenv.config()
 
@@ -32,6 +33,7 @@ const start = async () => {
   const id = readArgValue('--id')
   const email = readArgValue('--email').toLowerCase()
   const password = readArgValue('--password')
+  const collegeId = readArgValue('--collegeId') || getDefaultCollegeId()
 
   if (!password || (!id && !email)) {
     printUsage()
@@ -41,7 +43,7 @@ const start = async () => {
 
   await mongoose.connect(mongoUri)
 
-  const filter = id ? { _id: id } : { email }
+  const filter = id ? { _id: id, collegeId } : { email, collegeId }
   const admin = await Admin.findOne(filter)
   if (!admin) {
     throw new Error('Admin not found')

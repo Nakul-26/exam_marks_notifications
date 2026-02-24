@@ -6,6 +6,7 @@ import ExamSubject from '../models/ExamSubject.js'
 import Student from '../models/Student.js'
 import TeacherSubject from '../models/TeacherSubject.js'
 import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
+import { withCollegeScope } from '../utils/tenant.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -16,6 +17,14 @@ const asTrimmedString = (value) =>
 
 const asStringArray = (value) =>
   Array.isArray(value) ? value.map((item) => asTrimmedString(item)).filter(Boolean) : []
+
+const getMaxRecipientsPerRequest = () => {
+  const parsed = Number(process.env.WHATSAPP_MAX_RECIPIENTS_PER_REQUEST || 200)
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return 200
+  }
+  return Math.floor(parsed)
+}
 
 const getFirstConfiguredEnv = (...keys) => {
   for (const key of keys) {
@@ -144,14 +153,14 @@ const getWhatsAppProviderError = (sendResult) => {
   return baseMessage
 }
 
-const getTeacherMappings = async (teacherId) => {
-  return TeacherSubject.find({ teacher: teacherId })
+const getTeacherMappings = async (teacherId, collegeId) => {
+  return TeacherSubject.find(withCollegeScope(collegeId, { teacher: teacherId }))
     .select({ className: 1, section: 1, subject: 1 })
     .lean()
 }
 
-const getAllowedStudentIdsForTeacher = async (teacherId) => {
-  const teacherMappings = await getTeacherMappings(teacherId)
+const getAllowedStudentIdsForTeacher = async (teacherId, collegeId) => {
+  const teacherMappings = await getTeacherMappings(teacherId, collegeId)
   const uniqueClassKeys = Array.from(
     new Set(teacherMappings.map((mapping) => `${mapping.className}__${mapping.section}`)),
   )
@@ -163,19 +172,21 @@ const getAllowedStudentIdsForTeacher = async (teacherId) => {
     const [className, section] = classKey.split('__')
     return { className, section }
   })
-  const classStudents = await ClassStudent.find({
-    $or: classQuery,
-  })
+  const classStudents = await ClassStudent.find(
+    withCollegeScope(collegeId, {
+      $or: classQuery,
+    }),
+  )
     .select({ student: 1 })
     .lean()
 
   return Array.from(new Set(classStudents.map((classStudent) => String(classStudent.student))))
 }
 
-const filterMarksForTeacher = async (teacherId, marks) => {
+const filterMarksForTeacher = async (teacherId, marks, collegeId) => {
   if (!marks.length) return []
 
-  const teacherMappings = await getTeacherMappings(teacherId)
+  const teacherMappings = await getTeacherMappings(teacherId, collegeId)
   const allowedTriples = new Set(
     teacherMappings.map(
       (mapping) => `${mapping.className}__${mapping.section}__${mapping.subject}`,
@@ -192,9 +203,11 @@ const filterMarksForTeacher = async (teacherId, marks) => {
   ).filter(Boolean)
   if (!studentIds.length) return []
 
-  const classStudents = await ClassStudent.find({
-    student: { $in: studentIds },
-  })
+  const classStudents = await ClassStudent.find(
+    withCollegeScope(collegeId, {
+      student: { $in: studentIds },
+    }),
+  )
     .select({ className: 1, section: 1, student: 1 })
     .lean()
   const classKeysByStudentId = new Map()
@@ -224,9 +237,16 @@ router.post('/whatsapp/parents', async (req, res) => {
   try {
     let studentIds = asStringArray(req.body?.studentIds)
     const message = asTrimmedString(req.body?.message)
+    const maxRecipientsPerRequest = getMaxRecipientsPerRequest()
 
     if (!studentIds.length) {
       return res.status(400).json({ message: 'At least one student must be selected' })
+    }
+
+    if (studentIds.length > maxRecipientsPerRequest) {
+      return res.status(400).json({
+        message: `Too many recipients at once. Maximum allowed is ${maxRecipientsPerRequest}.`,
+      })
     }
 
     if (!message) {
@@ -234,7 +254,9 @@ router.post('/whatsapp/parents', async (req, res) => {
     }
 
     if (req.user.role === 'teacher') {
-      const allowedStudentIds = new Set(await getAllowedStudentIdsForTeacher(req.user.id))
+      const allowedStudentIds = new Set(
+        await getAllowedStudentIdsForTeacher(req.user.id, req.user.collegeId),
+      )
       studentIds = studentIds.filter((studentId) => allowedStudentIds.has(studentId))
       if (!studentIds.length) {
         return res.status(403).json({ message: 'You are not allowed to notify selected students' })
@@ -269,7 +291,9 @@ router.post('/whatsapp/parents', async (req, res) => {
       })
     }
 
-    const students = await Student.find({ _id: { $in: studentIds } })
+    const students = await Student.find(
+      withCollegeScope(req.user.collegeId, { _id: { $in: studentIds } }),
+    )
       .select({ name: 1, rollNo: 1, fatherPhone: 1 })
       .lean()
     const studentById = new Map(students.map((student) => [String(student._id), student]))
@@ -372,9 +396,16 @@ router.post('/whatsapp/marks', async (req, res) => {
     const examSubjectId = asTrimmedString(req.body?.examSubjectId)
     const selectedStudentIds = asStringArray(req.body?.studentIds)
     const additionalMessage = asTrimmedString(req.body?.additionalMessage)
+    const maxRecipientsPerRequest = getMaxRecipientsPerRequest()
 
     if (!examId) {
       return res.status(400).json({ message: 'Exam is required' })
+    }
+
+    if (selectedStudentIds.length > maxRecipientsPerRequest) {
+      return res.status(400).json({
+        message: `Too many recipients at once. Maximum allowed is ${maxRecipientsPerRequest}.`,
+      })
     }
 
     const whatsappAccessToken = getFirstConfiguredEnv(
@@ -405,19 +436,23 @@ router.post('/whatsapp/marks', async (req, res) => {
       })
     }
 
-    const exam = await Exam.findById(examId).lean()
+    const exam = await Exam.findOne(
+      withCollegeScope(req.user.collegeId, { _id: examId }),
+    ).lean()
     if (!exam) {
       return res.status(404).json({ message: 'Exam not found' })
     }
 
     if (examSubjectId) {
-      const examSubject = await ExamSubject.findById(examSubjectId).lean()
+      const examSubject = await ExamSubject.findOne(
+        withCollegeScope(req.user.collegeId, { _id: examSubjectId }),
+      ).lean()
       if (!examSubject || String(examSubject.examId) !== String(examId)) {
         return res.status(400).json({ message: 'Invalid exam subject for selected exam' })
       }
     }
 
-    const markQuery = { examId }
+    const markQuery = withCollegeScope(req.user.collegeId, { examId })
     if (examSubjectId) {
       markQuery.examSubjectId = examSubjectId
     }
@@ -432,7 +467,7 @@ router.post('/whatsapp/marks', async (req, res) => {
       .lean()
 
     if (req.user.role === 'teacher') {
-      marks = await filterMarksForTeacher(req.user.id, marks)
+      marks = await filterMarksForTeacher(req.user.id, marks, req.user.collegeId)
     }
 
     if (!marks.length) {
@@ -463,6 +498,12 @@ router.post('/whatsapp/marks', async (req, res) => {
         marksObtained: Number(mark.marksObtained || 0),
       })
       marksByStudentId.set(studentId, current)
+    }
+
+    if (marksByStudentId.size > maxRecipientsPerRequest) {
+      return res.status(400).json({
+        message: `Too many recipients at once. Maximum allowed is ${maxRecipientsPerRequest}.`,
+      })
     }
 
     const examDisplayName = `${exam.examName} (${exam.academicYear})`
