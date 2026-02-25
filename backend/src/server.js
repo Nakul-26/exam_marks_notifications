@@ -1,6 +1,7 @@
 import cors from 'cors'
 import dotenv from 'dotenv'
 import express from 'express'
+import mongoSanitize from 'express-mongo-sanitize'
 import rateLimit from 'express-rate-limit'
 import helmet from 'helmet'
 import mongoose from 'mongoose'
@@ -86,6 +87,7 @@ if (isProduction) {
 app.use(helmet())
 app.use(cors(corsOptions))
 app.use(express.json({ limit: '1mb' }))
+app.use(mongoSanitize())
 
 if (!isProduction) {
   app.use(morgan('dev'))

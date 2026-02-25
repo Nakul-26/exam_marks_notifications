@@ -5,6 +5,7 @@ import ExamMark from '../models/ExamMark.js'
 import ExamSubject from '../models/ExamSubject.js'
 import Student from '../models/Student.js'
 import TeacherSubject from '../models/TeacherSubject.js'
+import WhatsAppUsage from '../models/WhatsAppUsage.js'
 import { authorizeRoles, requireAuth } from '../middleware/authMiddleware.js'
 import { withCollegeScope } from '../utils/tenant.js'
 
@@ -24,6 +25,73 @@ const getMaxRecipientsPerRequest = () => {
     return 200
   }
   return Math.floor(parsed)
+}
+
+const getMonthlyWhatsAppSendCap = () => {
+  const parsed = Number(process.env.WHATSAPP_MONTHLY_SEND_CAP || 20000)
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return 20000
+  }
+  return Math.floor(parsed)
+}
+
+const getCurrentUtcMonthKey = () => {
+  const now = new Date()
+  const year = now.getUTCFullYear()
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
+}
+
+const reserveMonthlyWhatsAppQuota = async (collegeId, batchSize, monthlyCap) => {
+  if (batchSize <= 0) {
+    return { allowed: true, remaining: monthlyCap }
+  }
+  if (batchSize > monthlyCap) {
+    return { allowed: false, remaining: 0 }
+  }
+
+  const monthKey = getCurrentUtcMonthKey()
+  let usage = await WhatsAppUsage.findOne({ collegeId, monthKey }).lean()
+
+  if (!usage) {
+    try {
+      await WhatsAppUsage.create({ collegeId, monthKey, attemptedCount: 0 })
+    } catch (error) {
+      if (error?.code !== 11000) {
+        throw error
+      }
+    }
+    usage = await WhatsAppUsage.findOne({ collegeId, monthKey }).lean()
+  }
+
+  const threshold = monthlyCap - batchSize
+  const updateResult = await WhatsAppUsage.updateOne(
+    {
+      collegeId,
+      monthKey,
+      attemptedCount: { $lte: threshold },
+    },
+    {
+      $inc: {
+        attemptedCount: batchSize,
+      },
+    },
+  )
+
+  if (!updateResult.modifiedCount) {
+    const latestUsage = await WhatsAppUsage.findOne({ collegeId, monthKey }).lean()
+    const attemptedCount = Number(latestUsage?.attemptedCount || 0)
+    return {
+      allowed: false,
+      remaining: Math.max(0, monthlyCap - attemptedCount),
+    }
+  }
+
+  const attemptedCount = Number(usage?.attemptedCount || 0) + batchSize
+  return {
+    allowed: true,
+    remaining: Math.max(0, monthlyCap - attemptedCount),
+  }
 }
 
 const getFirstConfiguredEnv = (...keys) => {
@@ -238,6 +306,7 @@ router.post('/whatsapp/parents', async (req, res) => {
     let studentIds = asStringArray(req.body?.studentIds)
     const message = asTrimmedString(req.body?.message)
     const maxRecipientsPerRequest = getMaxRecipientsPerRequest()
+    const monthlyWhatsAppSendCap = getMonthlyWhatsAppSendCap()
 
     if (!studentIds.length) {
       return res.status(400).json({ message: 'At least one student must be selected' })
@@ -261,6 +330,17 @@ router.post('/whatsapp/parents', async (req, res) => {
       if (!studentIds.length) {
         return res.status(403).json({ message: 'You are not allowed to notify selected students' })
       }
+    }
+
+    const quotaReservation = await reserveMonthlyWhatsAppQuota(
+      req.user.collegeId,
+      studentIds.length,
+      monthlyWhatsAppSendCap,
+    )
+    if (!quotaReservation.allowed) {
+      return res.status(429).json({
+        message: `Monthly WhatsApp send cap reached. Cap: ${monthlyWhatsAppSendCap}, remaining: ${quotaReservation.remaining}.`,
+      })
     }
 
     const whatsappAccessToken = getFirstConfiguredEnv(
@@ -397,6 +477,7 @@ router.post('/whatsapp/marks', async (req, res) => {
     const selectedStudentIds = asStringArray(req.body?.studentIds)
     const additionalMessage = asTrimmedString(req.body?.additionalMessage)
     const maxRecipientsPerRequest = getMaxRecipientsPerRequest()
+    const monthlyWhatsAppSendCap = getMonthlyWhatsAppSendCap()
 
     if (!examId) {
       return res.status(400).json({ message: 'Exam is required' })
@@ -503,6 +584,17 @@ router.post('/whatsapp/marks', async (req, res) => {
     if (marksByStudentId.size > maxRecipientsPerRequest) {
       return res.status(400).json({
         message: `Too many recipients at once. Maximum allowed is ${maxRecipientsPerRequest}.`,
+      })
+    }
+
+    const quotaReservation = await reserveMonthlyWhatsAppQuota(
+      req.user.collegeId,
+      marksByStudentId.size,
+      monthlyWhatsAppSendCap,
+    )
+    if (!quotaReservation.allowed) {
+      return res.status(429).json({
+        message: `Monthly WhatsApp send cap reached. Cap: ${monthlyWhatsAppSendCap}, remaining: ${quotaReservation.remaining}.`,
       })
     }
 

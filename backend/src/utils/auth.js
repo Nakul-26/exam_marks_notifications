@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 
-const parseDurationSeconds = (rawValue, fallbackSeconds) => {
+export const parseDurationSeconds = (rawValue, fallbackSeconds) => {
   const value = typeof rawValue === 'string' ? rawValue.trim() : ''
   if (!value) return fallbackSeconds
 
@@ -37,7 +37,16 @@ const getSecret = () => {
 }
 
 const getTokenTtlSeconds = () => {
-  return parseDurationSeconds(process.env.JWT_EXPIRES_IN || '', 8 * 60 * 60)
+  const configuredTtl = process.env.ACCESS_TOKEN_EXPIRES_IN || process.env.JWT_EXPIRES_IN || ''
+  return parseDurationSeconds(configuredTtl, 15 * 60)
+}
+
+export const getRefreshTokenTtlSeconds = () => {
+  return parseDurationSeconds(process.env.REFRESH_TOKEN_EXPIRES_IN || '', 30 * 24 * 60 * 60)
+}
+
+export const getRefreshTokenExpiryDate = () => {
+  return new Date(Date.now() + getRefreshTokenTtlSeconds() * 1000)
 }
 
 export const hashPassword = (password) => {
@@ -65,13 +74,14 @@ export const verifyPassword = (password, storedHash) => {
   return crypto.timingSafeEqual(actual, expected)
 }
 
-export const signToken = (payload) => {
+export const signToken = (payload, options = {}) => {
   const secret = getSecret()
   const now = Math.floor(Date.now() / 1000)
-  const exp = now + getTokenTtlSeconds()
+  const optionsTtl = parseDurationSeconds(options.expiresIn || '', getTokenTtlSeconds())
+  const exp = now + optionsTtl
 
   const header = { alg: 'HS256', typ: 'JWT' }
-  const fullPayload = { ...payload, iat: now, exp }
+  const fullPayload = { ...payload, iat: now, exp, jti: options.jti || crypto.randomUUID() }
 
   const encodedHeader = encodeBase64Url(JSON.stringify(header))
   const encodedPayload = encodeBase64Url(JSON.stringify(fullPayload))
@@ -82,6 +92,16 @@ export const signToken = (payload) => {
     .digest('base64url')
 
   return `${signingInput}.${signature}`
+}
+
+export const generateOpaqueToken = () => {
+  return crypto.randomBytes(48).toString('base64url')
+}
+
+export const hashOpaqueToken = (token) => {
+  const value = typeof token === 'string' ? token.trim() : ''
+  if (!value) return ''
+  return crypto.createHash('sha256').update(value).digest('hex')
 }
 
 export const verifyToken = (token) => {

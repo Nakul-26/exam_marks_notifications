@@ -971,33 +971,63 @@ function App() {
   }
 
   useEffect(() => {
+    const applySession = (token: string, user: AuthUser) => {
+      setAuthToken(token)
+      setAuthUser(user)
+      localStorage.setItem(authTokenStorageKey, token)
+      localStorage.setItem(authUserStorageKey, JSON.stringify(user))
+      if (user.role === 'teacher') {
+        setActivePage('marks')
+      }
+    }
+
+    const clearSession = () => {
+      localStorage.removeItem(authTokenStorageKey)
+      localStorage.removeItem(authUserStorageKey)
+      setAuthToken('')
+      setAuthUser(null)
+    }
+
+    const tryRefreshSession = async () => {
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        return false
+      }
+      const token = String(payload?.data?.token || payload?.data?.accessToken || '')
+      const user = payload?.data?.user as AuthUser | undefined
+      if (!token || !user?.id || !user?.role) {
+        return false
+      }
+      applySession(token, user)
+      return true
+    }
+
     const restoreSession = async () => {
       const savedToken = localStorage.getItem(authTokenStorageKey) || ''
       const savedUserRaw = localStorage.getItem(authUserStorageKey)
 
-      if (!savedToken || !savedUserRaw) {
-        setAuthReady(true)
-        return
-      }
-
       try {
-        const response = await fetch('/api/auth/me', {
-          headers: { Authorization: `Bearer ${savedToken}` },
-        })
-        const payload = await response.json()
-        if (!response.ok) {
-          throw new Error(payload.message || 'Session expired')
+        if (savedToken && savedUserRaw) {
+          const response = await fetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${savedToken}` },
+          })
+          const payload = await response.json()
+          if (response.ok && payload?.data?.id && payload?.data?.role) {
+            applySession(savedToken, payload.data as AuthUser)
+            return
+          }
         }
 
-        const user = payload.data as AuthUser
-        setAuthToken(savedToken)
-        setAuthUser(user)
-        if (user.role === 'teacher') {
-          setActivePage('marks')
+        const refreshed = await tryRefreshSession()
+        if (!refreshed) {
+          clearSession()
         }
       } catch (_error) {
-        localStorage.removeItem(authTokenStorageKey)
-        localStorage.removeItem(authUserStorageKey)
+        clearSession()
       } finally {
         setAuthReady(true)
       }
@@ -1797,16 +1827,32 @@ function App() {
     }
   }
 
-  const handleLoginSuccess = (payload: { token: string; user: AuthUser }) => {
-    setAuthToken(payload.token)
+  const handleLoginSuccess = (payload: { token?: string; accessToken?: string; user: AuthUser }) => {
+    const nextToken = String(payload.token || payload.accessToken || '')
+    if (!nextToken) {
+      setError('Login failed: token missing')
+      return
+    }
+    setAuthToken(nextToken)
     setAuthUser(payload.user)
-    localStorage.setItem(authTokenStorageKey, payload.token)
+    localStorage.setItem(authTokenStorageKey, nextToken)
     localStorage.setItem(authUserStorageKey, JSON.stringify(payload.user))
     setError('')
     setActivePage(payload.user.role === 'teacher' ? 'marks' : 'students')
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (authToken) {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+          credentials: 'include',
+        })
+      } catch (_error) {
+        // Ignore logout API failures; local logout still clears client session.
+      }
+    }
     setAuthToken('')
     setAuthUser(null)
     localStorage.removeItem(authTokenStorageKey)
@@ -1991,7 +2037,7 @@ function App() {
               </button>
             </>
           )}
-          <button type="button" className="tab-button logout-button" onClick={handleLogout}>
+          <button type="button" className="tab-button logout-button" onClick={() => void handleLogout()}>
             Logout
           </button>
         </div>

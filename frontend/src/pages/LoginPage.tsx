@@ -9,7 +9,7 @@ type LoginUser = {
 }
 
 type LoginPageProps = {
-  onLoginSuccess: (payload: { token: string; user: LoginUser }) => void
+  onLoginSuccess: (payload: { token?: string; accessToken?: string; user: LoginUser }) => void
 }
 
 const authApiPath = '/api/auth/login'
@@ -30,6 +30,7 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
       const response = await fetch(authApiPath, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email: email.trim(), password }),
       })
       const payload = await response.json()

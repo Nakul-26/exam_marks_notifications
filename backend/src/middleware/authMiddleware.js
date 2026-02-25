@@ -1,4 +1,5 @@
-import { verifyToken } from '../utils/auth.js'
+import RevokedAccessToken from '../models/RevokedAccessToken.js'
+import { hashOpaqueToken, verifyToken } from '../utils/auth.js'
 import { getDefaultCollegeId } from '../utils/tenant.js'
 
 const getBearerToken = (authorizationHeader) => {
@@ -8,7 +9,7 @@ const getBearerToken = (authorizationHeader) => {
   return token.trim()
 }
 
-export const requireAuth = (req, res, next) => {
+export const requireAuth = async (req, res, next) => {
   try {
     const token = getBearerToken(req.headers.authorization)
     if (!token) {
@@ -16,6 +17,14 @@ export const requireAuth = (req, res, next) => {
     }
 
     const payload = verifyToken(token)
+    const tokenHash = hashOpaqueToken(token)
+    const revokedToken = await RevokedAccessToken.findOne({ tokenHash })
+      .select({ _id: 1 })
+      .lean()
+    if (revokedToken) {
+      return res.status(401).json({ message: 'Authentication failed' })
+    }
+
     req.user = {
       id: String(payload.id || ''),
       role: String(payload.role || ''),
