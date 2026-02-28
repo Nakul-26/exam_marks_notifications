@@ -3,7 +3,7 @@ import mongoose from 'mongoose'
 const revokedAccessTokenSchema = new mongoose.Schema(
   {
     tokenHash: { type: String, required: true, trim: true, unique: true, index: true },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, required: true },
     reason: { type: String, trim: true, default: '' },
   },
   { timestamps: true },

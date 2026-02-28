@@ -143,6 +143,38 @@ router.put('/:id', async (req, res) => {
   }
 })
 
+router.post('/:id/reset-password', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied' })
+  }
+
+  try {
+    const password = asTrimmedString(req.body?.password)
+    if (!password) {
+      return res.status(400).json({ message: 'Password is required' })
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters' })
+    }
+
+    const teacher = await Teacher.findOne(
+      withCollegeScope(req.user.collegeId, { _id: req.params.id }),
+    )
+    if (!teacher) {
+      return res.status(404).json({ message: 'Teacher not found' })
+    }
+
+    teacher.passwordHash = hashPassword(password)
+    teacher.failedLoginAttempts = 0
+    teacher.lockUntil = null
+    await teacher.save()
+
+    return res.json({ message: 'Password reset successful' })
+  } catch (_error) {
+    return res.status(400).json({ message: 'Failed to reset password' })
+  }
+})
+
 router.delete('/:id', async (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ message: 'Access denied' })

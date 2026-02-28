@@ -849,7 +849,7 @@ function App() {
       setSubjectLoading(true)
       setError('')
 
-      const response = await fetch(subjectApiPath)
+      const response = await fetch(subjectApiPath, { headers: authHeader })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -870,7 +870,7 @@ function App() {
       setTeacherLoading(true)
       setError('')
 
-      const response = await fetch(teacherApiPath)
+      const response = await fetch(teacherApiPath, { headers: authHeader })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -891,7 +891,7 @@ function App() {
       setTeacherSubjectLoading(true)
       setError('')
 
-      const response = await fetch(teacherSubjectApiPath)
+      const response = await fetch(teacherSubjectApiPath, { headers: authHeader })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -912,7 +912,7 @@ function App() {
       setClassSubjectLoading(true)
       setError('')
 
-      const response = await fetch(classSubjectApiPath)
+      const response = await fetch(classSubjectApiPath, { headers: authHeader })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -954,7 +954,7 @@ function App() {
       setClassLoading(true)
       setError('')
 
-      const response = await fetch(classApiPath)
+      const response = await fetch(classApiPath, { headers: authHeader })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -1271,7 +1271,7 @@ function App() {
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify(normalizedSubjectForm),
       })
 
@@ -1312,7 +1312,7 @@ function App() {
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify(normalizedTeacherForm),
       })
 
@@ -1350,7 +1350,7 @@ function App() {
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify(normalizedTeacherSubjectForm),
       })
 
@@ -1386,7 +1386,7 @@ function App() {
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify(normalizedClassForm),
       })
 
@@ -1424,7 +1424,7 @@ function App() {
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify(normalizedClassSubjectForm),
       })
 
@@ -1673,7 +1673,10 @@ function App() {
 
     try {
       setError('')
-      const response = await fetch(`${subjectApiPath}/${id}`, { method: 'DELETE' })
+      const response = await fetch(`${subjectApiPath}/${id}`, {
+        method: 'DELETE',
+        headers: authHeader,
+      })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -1698,7 +1701,10 @@ function App() {
 
     try {
       setError('')
-      const response = await fetch(`${teacherApiPath}/${id}`, { method: 'DELETE' })
+      const response = await fetch(`${teacherApiPath}/${id}`, {
+        method: 'DELETE',
+        headers: authHeader,
+      })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -1715,6 +1721,28 @@ function App() {
     }
   }
 
+  const handleTeacherPasswordReset = async (id: string, password: string) => {
+    try {
+      setError('')
+      const response = await fetch(`${teacherApiPath}/${id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader },
+        body: JSON.stringify({ password: password.trim() }),
+      })
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.message || 'Failed to reset teacher password')
+      }
+
+      await loadTeachers()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+      throw new Error(message)
+    }
+  }
+
   const handleTeacherSubjectDelete = async (id: string) => {
     const shouldDelete = window.confirm('Delete this mapping?')
     if (!shouldDelete) {
@@ -1725,6 +1753,7 @@ function App() {
       setError('')
       const response = await fetch(`${teacherSubjectApiPath}/${id}`, {
         method: 'DELETE',
+        headers: authHeader,
       })
       const payload = await response.json()
 
@@ -1750,7 +1779,10 @@ function App() {
 
     try {
       setError('')
-      const response = await fetch(`${classApiPath}/${id}`, { method: 'DELETE' })
+      const response = await fetch(`${classApiPath}/${id}`, {
+        method: 'DELETE',
+        headers: authHeader,
+      })
       const payload = await response.json()
 
       if (!response.ok) {
@@ -1782,6 +1814,7 @@ function App() {
       setError('')
       const response = await fetch(`${classSubjectApiPath}/${id}`, {
         method: 'DELETE',
+        headers: authHeader,
       })
       const payload = await response.json()
 
@@ -2673,6 +2706,7 @@ function App() {
           filteredTeachers={filteredTeachers}
           startTeacherEdit={startTeacherEdit}
           handleTeacherDelete={handleTeacherDelete}
+          handleTeacherPasswordReset={handleTeacherPasswordReset}
         />
       ) : activePage === 'teacherSubjects' ? (
         <TeacherSubjectManagementPage

@@ -26,6 +26,7 @@ type TeacherManagementPageProps = {
   filteredTeachers: Teacher[]
   startTeacherEdit: (teacher: Teacher) => void
   handleTeacherDelete: (id: string) => Promise<void>
+  handleTeacherPasswordReset: (id: string, password: string) => Promise<void>
 }
 
 function TeacherManagementPage({
@@ -42,8 +43,58 @@ function TeacherManagementPage({
   filteredTeachers,
   startTeacherEdit,
   handleTeacherDelete,
+  handleTeacherPasswordReset,
 }: TeacherManagementPageProps) {
   const [showPassword, setShowPassword] = useState(false)
+  const [resetTeacherId, setResetTeacherId] = useState('')
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('')
+  const [resetSubmitting, setResetSubmitting] = useState(false)
+  const [resetError, setResetError] = useState('')
+
+  const selectedResetTeacher =
+    teachers.find((teacher) => teacher._id === resetTeacherId) || null
+
+  const startResetPassword = (teacher: Teacher) => {
+    setResetTeacherId(teacher._id)
+    setResetPassword('')
+    setResetConfirmPassword('')
+    setResetError('')
+  }
+
+  const cancelResetPassword = () => {
+    setResetTeacherId('')
+    setResetPassword('')
+    setResetConfirmPassword('')
+    setResetError('')
+  }
+
+  const submitPasswordReset = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!resetTeacherId) {
+      return
+    }
+    if (resetPassword.length < 6) {
+      setResetError('Password must be at least 6 characters')
+      return
+    }
+    if (resetPassword !== resetConfirmPassword) {
+      setResetError('Passwords do not match')
+      return
+    }
+
+    try {
+      setResetSubmitting(true)
+      setResetError('')
+      await handleTeacherPasswordReset(resetTeacherId, resetPassword)
+      cancelResetPassword()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to reset password'
+      setResetError(message)
+    } finally {
+      setResetSubmitting(false)
+    }
+  }
 
   return (
     <>
@@ -145,6 +196,54 @@ function TeacherManagementPage({
         </form>
       </section>
 
+      {selectedResetTeacher ? (
+        <section className="panel">
+          <h2>Reset Teacher Password</h2>
+          <p>
+            Reset password for <strong>{selectedResetTeacher.name}</strong> (
+            {selectedResetTeacher.email})
+          </p>
+          {resetError ? <p className="error">{resetError}</p> : null}
+          <form className="student-form" onSubmit={submitPasswordReset}>
+            <label className="field">
+              <span>New Password</span>
+              <input
+                type="password"
+                placeholder="Minimum 6 characters"
+                value={resetPassword}
+                onChange={(event) => setResetPassword(event.target.value)}
+                minLength={6}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>Confirm Password</span>
+              <input
+                type="password"
+                placeholder="Re-enter password"
+                value={resetConfirmPassword}
+                onChange={(event) => setResetConfirmPassword(event.target.value)}
+                minLength={6}
+                required
+              />
+            </label>
+            <div className="actions">
+              <button type="submit" className="primary" disabled={resetSubmitting}>
+                {resetSubmitting ? 'Resetting...' : 'Reset Password'}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={cancelResetPassword}
+                disabled={resetSubmitting}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
       <section className="panel">
         <h2>All Teachers</h2>
         {teacherLoading ? <p>Loading...</p> : null}
@@ -168,6 +267,9 @@ function TeacherManagementPage({
                     <div className="row-actions">
                       <button type="button" onClick={() => startTeacherEdit(teacher)}>
                         Edit
+                      </button>
+                      <button type="button" onClick={() => startResetPassword(teacher)}>
+                        Reset Password
                       </button>
                       <button
                         type="button"

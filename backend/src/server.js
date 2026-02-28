@@ -1,7 +1,6 @@
 import cors from 'cors'
 import dotenv from 'dotenv'
 import express from 'express'
-import mongoSanitize from 'express-mongo-sanitize'
 import rateLimit from 'express-rate-limit'
 import helmet from 'helmet'
 import mongoose from 'mongoose'
@@ -80,6 +79,34 @@ const authLimiter = rateLimit({
   message: { message: 'Too many authentication attempts, please try again later.' },
 })
 
+const shouldStripMongoKey = (key) => key.startsWith('$') || key.includes('.')
+
+const sanitizeInPlace = (value) => {
+  if (!value || typeof value !== 'object') {
+    return
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => sanitizeInPlace(item))
+    return
+  }
+
+  for (const key of Object.keys(value)) {
+    if (shouldStripMongoKey(key)) {
+      delete value[key]
+      continue
+    }
+    sanitizeInPlace(value[key])
+  }
+}
+
+const sanitizeRequestPayload = (req, _res, next) => {
+  sanitizeInPlace(req.body)
+  sanitizeInPlace(req.params)
+  sanitizeInPlace(req.query)
+  next()
+}
+
 if (isProduction) {
   app.set('trust proxy', 1)
 }
@@ -87,7 +114,7 @@ if (isProduction) {
 app.use(helmet())
 app.use(cors(corsOptions))
 app.use(express.json({ limit: '1mb' }))
-app.use(mongoSanitize())
+app.use(sanitizeRequestPayload)
 
 if (!isProduction) {
   app.use(morgan('dev'))

@@ -6,7 +6,7 @@ const refreshTokenSchema = new mongoose.Schema(
     userId: { type: String, required: true, trim: true, index: true },
     userRole: { type: String, required: true, trim: true, enum: ['admin', 'teacher'], index: true },
     tokenHash: { type: String, required: true, trim: true, unique: true, index: true },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, required: true },
     revokedAt: { type: Date, default: null, index: true },
     revokeReason: { type: String, trim: true, default: '' },
     replacedByTokenHash: { type: String, trim: true, default: '' },
