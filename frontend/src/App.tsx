@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import * as XLSX from 'xlsx'
 import './App.css'
 import ClassStudentManagementPage from './pages/ClassStudentManagementPage'
 import ClassSubjectManagementPage from './pages/ClassSubjectManagementPage'
@@ -218,6 +219,13 @@ const classSubjectApiPath = '/api/class-subjects'
 const classStudentApiPath = '/api/class-students'
 const phoneRegex = /^\d{10,15}$/
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const studentExcelTemplateHeaders = [
+  'name',
+  'rollNo',
+  'fatherName',
+  'studentPhone',
+  'fatherPhone',
+]
 const classKeySeparator = '__'
 const authTokenStorageKey = 'authToken'
 const authUserStorageKey = 'authUser'
@@ -459,6 +467,8 @@ function App() {
   const [studentSearch, setStudentSearch] = useState('')
   const [studentLoading, setStudentLoading] = useState(false)
   const [studentSubmitting, setStudentSubmitting] = useState(false)
+  const [studentBulkSubmitting, setStudentBulkSubmitting] = useState(false)
+  const studentUploadInputRef = useRef<HTMLInputElement | null>(null)
 
   const [exams, setExams] = useState<Exam[]>([])
   const [examForm, setExamForm] = useState<ExamFormState>(initialExamFormState)
@@ -1202,6 +1212,180 @@ function App() {
       setError(message)
     } finally {
       setExamSubmitting(false)
+    }
+  }
+
+  const downloadStudentExcelTemplate = () => {
+    const worksheet = XLSX.utils.aoa_to_sheet([studentExcelTemplateHeaders])
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'StudentsTemplate')
+    XLSX.writeFile(workbook, 'students_template.xlsx')
+  }
+
+  const uploadStudentExcelSheet = async (file: File) => {
+    try {
+      setStudentBulkSubmitting(true)
+      setError('')
+
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer, { type: 'array' })
+      const firstSheetName = workbook.SheetNames[0]
+      if (!firstSheetName) {
+        throw new Error('Uploaded file has no sheet')
+      }
+
+      const worksheet = workbook.Sheets[firstSheetName]
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+        defval: '',
+      })
+      if (!rows.length) {
+        throw new Error('Uploaded sheet has no data rows')
+      }
+
+      const headers = Object.keys(rows[0] || {})
+      const hasRequiredHeaders = studentExcelTemplateHeaders.every((header) =>
+        headers.includes(header),
+      )
+      if (!hasRequiredHeaders) {
+        throw new Error(
+          'Invalid headers. Required columns: name, rollNo, fatherName, studentPhone, fatherPhone',
+        )
+      }
+
+      const existingByRollNo = new Map(
+        students.map((student) => [student.rollNo.trim().toLowerCase(), student]),
+      )
+      const seenRollNos = new Set<string>()
+
+      const normalizedRows = rows
+        .map((row, index) => {
+          const normalized = normalizeStudentForm({
+            name: String(row.name || ''),
+            rollNo: String(row.rollNo || ''),
+            fatherName: String(row.fatherName || ''),
+            studentPhone: String(row.studentPhone || ''),
+            fatherPhone: String(row.fatherPhone || ''),
+          })
+          return { rowNo: index + 2, normalized }
+        })
+        .filter(({ normalized }) =>
+          Object.values(normalized).some((value) => value.trim() !== ''),
+        )
+
+      if (!normalizedRows.length) {
+        throw new Error('No valid rows found to upload')
+      }
+
+      const failedRows: Array<{
+        rowNo: number
+        rollNo: string
+        studentName: string
+        reason: string
+      }> = []
+      const validRows: Array<{ rowNo: number; normalized: StudentFormState }> = []
+
+      for (const { rowNo, normalized } of normalizedRows) {
+        const validationError = validateStudentForm(normalized)
+        if (validationError) {
+          failedRows.push({
+            rowNo,
+            rollNo: normalized.rollNo,
+            studentName: normalized.name,
+            reason: validationError,
+          })
+          continue
+        }
+        const normalizedRollNo = normalized.rollNo.toLowerCase()
+        if (seenRollNos.has(normalizedRollNo)) {
+          failedRows.push({
+            rowNo,
+            rollNo: normalized.rollNo,
+            studentName: normalized.name,
+            reason: `Duplicate roll no "${normalized.rollNo}" in upload file`,
+          })
+          continue
+        }
+        seenRollNos.add(normalizedRollNo)
+        validRows.push({ rowNo, normalized })
+      }
+
+      const saveResults = await Promise.all(
+        validRows.map(async ({ rowNo, normalized }) => {
+          const existingStudent = existingByRollNo.get(normalized.rollNo.toLowerCase())
+          const method = existingStudent ? 'PUT' : 'POST'
+          const url = existingStudent
+            ? `${studentApiPath}/${existingStudent._id}`
+            : studentApiPath
+
+          try {
+            const response = await fetch(url, {
+              method,
+              headers: { 'Content-Type': 'application/json', ...authHeader },
+              body: JSON.stringify(normalized),
+            })
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok) {
+              const message =
+                typeof payload?.message === 'string'
+                  ? payload.message
+                  : `Failed to save student with roll no ${normalized.rollNo}`
+              return {
+                ok: false as const,
+                rowNo,
+                rollNo: normalized.rollNo,
+                studentName: normalized.name,
+                reason: message,
+              }
+            }
+
+            return { ok: true as const }
+          } catch (_error) {
+            return {
+              ok: false as const,
+              rowNo,
+              rollNo: normalized.rollNo,
+              studentName: normalized.name,
+              reason: 'Network or server error while saving row',
+            }
+          }
+        }),
+      )
+
+      const failedSaveRows = saveResults.filter((result) => !result.ok)
+      failedRows.push(...failedSaveRows)
+
+      const totalRows = normalizedRows.length
+      const failedCount = failedRows.length
+      const successCount = totalRows - failedCount
+
+      if (successCount > 0) {
+        await Promise.all([loadStudents(), loadClassStudents()])
+      }
+
+      if (failedCount > 0) {
+        const failedStudentList = failedRows
+          .map((row) => `${row.rollNo || 'N/A'}, ${row.studentName || 'N/A'}`)
+          .join(' | ')
+
+        if (failedCount === totalRows) {
+          setError(
+            `Complete failure: all ${totalRows} students failed. Failed rows (Roll No, Student Name): ${failedStudentList}`,
+          )
+          return
+        }
+
+        setError(
+          `Partial failure: ${failedCount} of ${totalRows} students failed. Failed rows (Roll No, Student Name): ${failedStudentList}`,
+        )
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      if (studentUploadInputRef.current) {
+        studentUploadInputRef.current.value = ''
+      }
+      setStudentBulkSubmitting(false)
     }
   }
 
@@ -2085,6 +2269,35 @@ function App() {
               <div className="stat-card">
                 <span>Total Students</span>
                 <strong>{students.length}</strong>
+              </div>
+              <div className="actions" style={{ marginTop: 0 }}>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={downloadStudentExcelTemplate}
+                >
+                  Download Empty Excel
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => studentUploadInputRef.current?.click()}
+                  disabled={studentBulkSubmitting}
+                >
+                  {studentBulkSubmitting ? 'Uploading...' : 'Upload Filled Excel'}
+                </button>
+                <input
+                  ref={studentUploadInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  style={{ display: 'none' }}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file) {
+                      void uploadStudentExcelSheet(file)
+                    }
+                  }}
+                />
               </div>
               <div className="search-wrap">
                 <label htmlFor="search-students">Search students</label>
