@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import Admin from '../models/Admin.js'
+import AuditLog from '../models/AuditLog.js'
 import RefreshToken from '../models/RefreshToken.js'
 import RevokedAccessToken from '../models/RevokedAccessToken.js'
 import Teacher from '../models/Teacher.js'
@@ -100,6 +101,31 @@ const logSuccessfulLogin = (role, user) => {
   console.log(
     `[auth] login success role=${role} id=${user._id} email=${user.email} at=${new Date().toISOString()}`,
   )
+}
+
+const writeSuccessfulLoginAudit = async ({ role, user, req }) => {
+  try {
+    await AuditLog.create({
+      collegeId: user.collegeId || getDefaultCollegeId(),
+      actorId: user._id || '',
+      actorRole: role,
+      actorName: user.name || '',
+      actorEmail: user.email || '',
+      action: 'POST /api/auth/login',
+      resourceType: 'auth',
+      resourceId: user._id || '',
+      status: 'success',
+      statusCode: 200,
+      method: 'POST',
+      path: '/api/auth/login',
+      ip: asTrimmedString(req.ip),
+      userAgent: asTrimmedString(req.get('user-agent')),
+      message: 'Login successful',
+    })
+  } catch (_error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to write auth login audit log')
+  }
 }
 
 const setRefreshTokenCookie = (res, refreshToken) => {
@@ -321,6 +347,7 @@ router.post('/login', async (req, res) => {
       const safeAdmin = sanitizeAdmin(admin)
       const session = await issueSessionTokens({ role: 'admin', user: safeAdmin, req, res })
       logSuccessfulLogin('admin', safeAdmin)
+      await writeSuccessfulLoginAudit({ role: 'admin', user: safeAdmin, req })
 
       return res.json({ data: session })
     }
@@ -350,6 +377,7 @@ router.post('/login', async (req, res) => {
       const safeTeacher = sanitizeTeacher(teacher)
       const session = await issueSessionTokens({ role: 'teacher', user: safeTeacher, req, res })
       logSuccessfulLogin('teacher', safeTeacher)
+      await writeSuccessfulLoginAudit({ role: 'teacher', user: safeTeacher, req })
 
       return res.json({ data: session })
     }

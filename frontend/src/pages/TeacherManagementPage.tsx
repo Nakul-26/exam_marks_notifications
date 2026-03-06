@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
 
 type Teacher = {
@@ -27,6 +27,9 @@ type TeacherManagementPageProps = {
   startTeacherEdit: (teacher: Teacher) => void
   handleTeacherDelete: (id: string) => Promise<void>
   handleTeacherPasswordReset: (id: string, password: string) => Promise<void>
+  teacherBulkSubmitting: boolean
+  downloadTeacherExcelTemplate: () => void
+  uploadTeacherExcelSheet: (file: File) => Promise<void>
 }
 
 function TeacherManagementPage({
@@ -44,7 +47,11 @@ function TeacherManagementPage({
   startTeacherEdit,
   handleTeacherDelete,
   handleTeacherPasswordReset,
+  teacherBulkSubmitting,
+  downloadTeacherExcelTemplate,
+  uploadTeacherExcelSheet,
 }: TeacherManagementPageProps) {
+  const teacherUploadInputRef = useRef<HTMLInputElement | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [resetTeacherId, setResetTeacherId] = useState('')
   const [resetPassword, setResetPassword] = useState('')
@@ -111,6 +118,36 @@ function TeacherManagementPage({
               placeholder="Search by name, email, phone..."
               value={teacherSearch}
               onChange={(event) => setTeacherSearch(event.target.value)}
+            />
+          </div>
+          <div className="actions" style={{ marginTop: 0 }}>
+            <button
+              type="button"
+              className="secondary"
+              onClick={downloadTeacherExcelTemplate}
+            >
+              Download Empty Excel
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => teacherUploadInputRef.current?.click()}
+              disabled={teacherBulkSubmitting}
+            >
+              {teacherBulkSubmitting ? 'Uploading...' : 'Upload Filled Excel'}
+            </button>
+            <input
+              ref={teacherUploadInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              style={{ display: 'none' }}
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) {
+                  void uploadTeacherExcelSheet(file)
+                }
+                event.target.value = ''
+              }}
             />
           </div>
         </div>

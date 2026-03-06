@@ -226,6 +226,8 @@ const studentExcelTemplateHeaders = [
   'studentPhone',
   'fatherPhone',
 ]
+const teacherExcelTemplateHeaders = ['name', 'email', 'phone', 'password']
+const classExcelTemplateHeaders = ['className', 'section']
 const classKeySeparator = '__'
 const authTokenStorageKey = 'authToken'
 const authUserStorageKey = 'authUser'
@@ -510,6 +512,7 @@ function App() {
   const [teacherSearch, setTeacherSearch] = useState('')
   const [teacherLoading, setTeacherLoading] = useState(false)
   const [teacherSubmitting, setTeacherSubmitting] = useState(false)
+  const [teacherBulkSubmitting, setTeacherBulkSubmitting] = useState(false)
 
   const [teacherSubjects, setTeacherSubjects] = useState<TeacherSubject[]>([])
   const [teacherSubjectForm, setTeacherSubjectForm] =
@@ -549,6 +552,8 @@ function App() {
   const [classSearch, setClassSearch] = useState('')
   const [classLoading, setClassLoading] = useState(false)
   const [classSubmitting, setClassSubmitting] = useState(false)
+  const [classBulkSubmitting, setClassBulkSubmitting] = useState(false)
+  const classUploadInputRef = useRef<HTMLInputElement | null>(null)
 
   const [error, setError] = useState('')
   const isTeacherUser = authUser?.role === 'teacher'
@@ -1515,6 +1520,179 @@ function App() {
     }
   }
 
+  const downloadTeacherExcelTemplate = () => {
+    const worksheet = XLSX.utils.aoa_to_sheet([teacherExcelTemplateHeaders])
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'TeachersTemplate')
+    XLSX.writeFile(workbook, 'teachers_template.xlsx')
+  }
+
+  const uploadTeacherExcelSheet = async (file: File) => {
+    try {
+      setTeacherBulkSubmitting(true)
+      setError('')
+
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer, { type: 'array' })
+      const firstSheetName = workbook.SheetNames[0]
+      if (!firstSheetName) {
+        throw new Error('Uploaded file has no sheet')
+      }
+
+      const worksheet = workbook.Sheets[firstSheetName]
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+        defval: '',
+      })
+      if (!rows.length) {
+        throw new Error('Uploaded sheet has no data rows')
+      }
+
+      const headers = Object.keys(rows[0] || {})
+      const hasRequiredHeaders = teacherExcelTemplateHeaders.every((header) =>
+        headers.includes(header),
+      )
+      if (!hasRequiredHeaders) {
+        throw new Error(
+          'Invalid headers. Required columns: name, email, phone, password',
+        )
+      }
+
+      const existingByEmail = new Map(
+        teachers.map((teacher) => [teacher.email.trim().toLowerCase(), teacher]),
+      )
+      const seenEmails = new Set<string>()
+
+      const normalizedRows = rows
+        .map((row, index) => {
+          const normalized = normalizeTeacherForm({
+            name: String(row.name || ''),
+            email: String(row.email || ''),
+            phone: String(row.phone || ''),
+            password: String(row.password || ''),
+          })
+          return { rowNo: index + 2, normalized }
+        })
+        .filter(({ normalized }) =>
+          Object.values(normalized).some((value) => value.trim() !== ''),
+        )
+
+      if (!normalizedRows.length) {
+        throw new Error('No valid rows found to upload')
+      }
+
+      const failedRows: Array<{
+        rowNo: number
+        email: string
+        teacherName: string
+        reason: string
+      }> = []
+      const validRows: Array<{ rowNo: number; normalized: TeacherFormState }> = []
+
+      for (const { rowNo, normalized } of normalizedRows) {
+        const existingTeacher = existingByEmail.get(normalized.email.toLowerCase())
+        const validationError = validateTeacherForm(normalized, !existingTeacher)
+
+        if (validationError) {
+          failedRows.push({
+            rowNo,
+            email: normalized.email,
+            teacherName: normalized.name,
+            reason: validationError,
+          })
+          continue
+        }
+
+        const normalizedEmail = normalized.email.toLowerCase()
+        if (seenEmails.has(normalizedEmail)) {
+          failedRows.push({
+            rowNo,
+            email: normalized.email,
+            teacherName: normalized.name,
+            reason: `Duplicate email "${normalized.email}" in upload file`,
+          })
+          continue
+        }
+        seenEmails.add(normalizedEmail)
+        validRows.push({ rowNo, normalized })
+      }
+
+      const saveResults = await Promise.all(
+        validRows.map(async ({ rowNo, normalized }) => {
+          const existingTeacher = existingByEmail.get(normalized.email.toLowerCase())
+          const method = existingTeacher ? 'PUT' : 'POST'
+          const url = existingTeacher
+            ? `${teacherApiPath}/${existingTeacher._id}`
+            : teacherApiPath
+
+          try {
+            const response = await fetch(url, {
+              method,
+              headers: { 'Content-Type': 'application/json', ...authHeader },
+              body: JSON.stringify(normalized),
+            })
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok) {
+              const message =
+                typeof payload?.message === 'string'
+                  ? payload.message
+                  : `Failed to save teacher with email ${normalized.email}`
+              return {
+                ok: false as const,
+                rowNo,
+                email: normalized.email,
+                teacherName: normalized.name,
+                reason: message,
+              }
+            }
+
+            return { ok: true as const }
+          } catch (_error) {
+            return {
+              ok: false as const,
+              rowNo,
+              email: normalized.email,
+              teacherName: normalized.name,
+              reason: 'Network or server error while saving row',
+            }
+          }
+        }),
+      )
+
+      const failedSaveRows = saveResults.filter((result) => !result.ok)
+      failedRows.push(...failedSaveRows)
+
+      const totalRows = normalizedRows.length
+      const failedCount = failedRows.length
+      const successCount = totalRows - failedCount
+
+      if (successCount > 0) {
+        await Promise.all([loadTeachers(), loadTeacherSubjects()])
+      }
+
+      if (failedCount > 0) {
+        const failedTeacherList = failedRows
+          .map((row) => `${row.email || 'N/A'}, ${row.teacherName || 'N/A'}`)
+          .join(' | ')
+
+        if (failedCount === totalRows) {
+          setError(
+            `Complete failure: all ${totalRows} teachers failed. Failed rows (Email, Teacher Name): ${failedTeacherList}`,
+          )
+          return
+        }
+
+        setError(
+          `Partial failure: ${failedCount} of ${totalRows} teachers failed. Failed rows (Email, Teacher Name): ${failedTeacherList}`,
+        )
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setTeacherBulkSubmitting(false)
+    }
+  }
+
   const handleTeacherSubjectSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
@@ -1586,6 +1764,179 @@ function App() {
       setError(message)
     } finally {
       setClassSubmitting(false)
+    }
+  }
+
+  const downloadClassExcelTemplate = () => {
+    const worksheet = XLSX.utils.aoa_to_sheet([classExcelTemplateHeaders])
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'ClassesTemplate')
+    XLSX.writeFile(workbook, 'classes_template.xlsx')
+  }
+
+  const uploadClassExcelSheet = async (file: File) => {
+    try {
+      setClassBulkSubmitting(true)
+      setError('')
+
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer, { type: 'array' })
+      const firstSheetName = workbook.SheetNames[0]
+      if (!firstSheetName) {
+        throw new Error('Uploaded file has no sheet')
+      }
+
+      const worksheet = workbook.Sheets[firstSheetName]
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+        defval: '',
+      })
+      if (!rows.length) {
+        throw new Error('Uploaded sheet has no data rows')
+      }
+
+      const headers = Object.keys(rows[0] || {})
+      const hasRequiredHeaders = classExcelTemplateHeaders.every((header) =>
+        headers.includes(header),
+      )
+      if (!hasRequiredHeaders) {
+        throw new Error('Invalid headers. Required columns: className, section')
+      }
+
+      const existingByClassKey = new Map(
+        classes.map((classRecord) => [
+          `${classRecord.className.trim().toLowerCase()}__${classRecord.section
+            .trim()
+            .toLowerCase()}`,
+          classRecord,
+        ]),
+      )
+      const seenClassKeys = new Set<string>()
+
+      const normalizedRows = rows
+        .map((row, index) => {
+          const normalized = normalizeClassForm({
+            className: String(row.className || ''),
+            section: String(row.section || ''),
+          })
+          return { rowNo: index + 2, normalized }
+        })
+        .filter(({ normalized }) =>
+          Object.values(normalized).some((value) => value.trim() !== ''),
+        )
+
+      if (!normalizedRows.length) {
+        throw new Error('No valid rows found to upload')
+      }
+
+      const failedRows: Array<{
+        rowNo: number
+        className: string
+        section: string
+        reason: string
+      }> = []
+      const validRows: Array<{ rowNo: number; normalized: ClassFormState }> = []
+
+      for (const { rowNo, normalized } of normalizedRows) {
+        const validationError = validateClassForm(normalized)
+        if (validationError) {
+          failedRows.push({
+            rowNo,
+            className: normalized.className,
+            section: normalized.section,
+            reason: validationError,
+          })
+          continue
+        }
+
+        const classKey = `${normalized.className.toLowerCase()}__${normalized.section.toLowerCase()}`
+        if (seenClassKeys.has(classKey)) {
+          failedRows.push({
+            rowNo,
+            className: normalized.className,
+            section: normalized.section,
+            reason: `Duplicate class-section "${normalized.className}-${normalized.section}" in upload file`,
+          })
+          continue
+        }
+        seenClassKeys.add(classKey)
+        validRows.push({ rowNo, normalized })
+      }
+
+      const saveResults = await Promise.all(
+        validRows.map(async ({ rowNo, normalized }) => {
+          const classKey = `${normalized.className.toLowerCase()}__${normalized.section.toLowerCase()}`
+          const existingClass = existingByClassKey.get(classKey)
+          const method = existingClass ? 'PUT' : 'POST'
+          const url = existingClass ? `${classApiPath}/${existingClass._id}` : classApiPath
+
+          try {
+            const response = await fetch(url, {
+              method,
+              headers: { 'Content-Type': 'application/json', ...authHeader },
+              body: JSON.stringify(normalized),
+            })
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok) {
+              const message =
+                typeof payload?.message === 'string'
+                  ? payload.message
+                  : `Failed to save class ${normalized.className}-${normalized.section}`
+              return {
+                ok: false as const,
+                rowNo,
+                className: normalized.className,
+                section: normalized.section,
+                reason: message,
+              }
+            }
+            return { ok: true as const }
+          } catch (_error) {
+            return {
+              ok: false as const,
+              rowNo,
+              className: normalized.className,
+              section: normalized.section,
+              reason: 'Network or server error while saving row',
+            }
+          }
+        }),
+      )
+
+      const failedSaveRows = saveResults.filter((result) => !result.ok)
+      failedRows.push(...failedSaveRows)
+
+      const totalRows = normalizedRows.length
+      const failedCount = failedRows.length
+      const successCount = totalRows - failedCount
+
+      if (successCount > 0) {
+        await loadClasses()
+      }
+
+      if (failedCount > 0) {
+        const failedClassList = failedRows
+          .map((row) => `${row.className || 'N/A'}, ${row.section || 'N/A'}`)
+          .join(' | ')
+
+        if (failedCount === totalRows) {
+          setError(
+            `Complete failure: all ${totalRows} classes failed. Failed rows (Class, Section): ${failedClassList}`,
+          )
+          return
+        }
+
+        setError(
+          `Partial failure: ${failedCount} of ${totalRows} classes failed. Failed rows (Class, Section): ${failedClassList}`,
+        )
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      if (classUploadInputRef.current) {
+        classUploadInputRef.current.value = ''
+      }
+      setClassBulkSubmitting(false)
     }
   }
 
@@ -2920,6 +3271,9 @@ function App() {
           startTeacherEdit={startTeacherEdit}
           handleTeacherDelete={handleTeacherDelete}
           handleTeacherPasswordReset={handleTeacherPasswordReset}
+          teacherBulkSubmitting={teacherBulkSubmitting}
+          downloadTeacherExcelTemplate={downloadTeacherExcelTemplate}
+          uploadTeacherExcelSheet={uploadTeacherExcelSheet}
         />
       ) : activePage === 'teacherSubjects' ? (
         <TeacherSubjectManagementPage
@@ -2997,6 +3351,35 @@ function App() {
               <div className="stat-card">
                 <span>Total Classes</span>
                 <strong>{classes.length}</strong>
+              </div>
+              <div className="actions" style={{ marginTop: 0 }}>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={downloadClassExcelTemplate}
+                >
+                  Download Empty Excel
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => classUploadInputRef.current?.click()}
+                  disabled={classBulkSubmitting}
+                >
+                  {classBulkSubmitting ? 'Uploading...' : 'Upload Filled Excel'}
+                </button>
+                <input
+                  ref={classUploadInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  style={{ display: 'none' }}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file) {
+                      void uploadClassExcelSheet(file)
+                    }
+                  }}
+                />
               </div>
               <div className="search-wrap">
                 <label htmlFor="search-classes">Search classes</label>

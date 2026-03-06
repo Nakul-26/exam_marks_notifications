@@ -32,6 +32,28 @@ type AuditLogsPageProps = {
 }
 
 const auditLogsApiPath = '/api/audit-logs'
+const actionTypeOptions = [
+  { label: 'All Actions', value: '' },
+  { label: 'Create (POST)', value: 'POST ' },
+  { label: 'Update (PUT/PATCH)', value: 'PUT ' },
+  { label: 'Delete (DELETE)', value: 'DELETE ' },
+]
+
+const moduleOptions = [
+  { label: 'All Modules', value: '' },
+  { label: 'Students', value: '/api/students' },
+  { label: 'Exams', value: '/api/exams' },
+  { label: 'Exam Subjects', value: '/api/exam-subjects' },
+  { label: 'Marks', value: '/api/exam-marks' },
+  { label: 'Subjects', value: '/api/subjects' },
+  { label: 'Teachers', value: '/api/teachers' },
+  { label: 'Teacher Subjects', value: '/api/teacher-subjects' },
+  { label: 'Classes', value: '/api/classes' },
+  { label: 'Class Subjects', value: '/api/class-subjects' },
+  { label: 'Class Students', value: '/api/class-students' },
+  { label: 'Notifications', value: '/api/notifications' },
+  { label: 'Auth Login', value: '/api/auth/login' },
+]
 
 function AuditLogsPage({ authToken }: AuditLogsPageProps) {
   const [rows, setRows] = useState<AuditLogRow[]>([])
@@ -52,6 +74,16 @@ function AuditLogsPage({ authToken }: AuditLogsPageProps) {
     () => ({ Authorization: `Bearer ${authToken}` }),
     [authToken],
   )
+
+  const resetFilters = () => {
+    setActorRole('')
+    setStatus('')
+    setAction('')
+    setPath('')
+    setFrom('')
+    setTo('')
+    setPage(1)
+  }
 
   useEffect(() => {
     const controller = new AbortController()
@@ -191,6 +223,38 @@ function AuditLogsPage({ authToken }: AuditLogsPageProps) {
               <option value="200">200</option>
             </select>
           </label>
+          <label className="filter-field">
+            <span>Action Type</span>
+            <select
+              value={action}
+              onChange={(event) => {
+                setAction(event.target.value)
+                setPage(1)
+              }}
+            >
+              {actionTypeOptions.map((option) => (
+                <option key={option.label} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="filter-field">
+            <span>Module</span>
+            <select
+              value={path}
+              onChange={(event) => {
+                setPath(event.target.value)
+                setPage(1)
+              }}
+            >
+              {moduleOptions.map((option) => (
+                <option key={option.label} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="stats-row" style={{ marginTop: '0.75rem' }}>
@@ -217,10 +281,10 @@ function AuditLogsPage({ authToken }: AuditLogsPageProps) {
             />
           </label>
           <div className="search-wrap">
-            <label htmlFor="search-audit-action">Search action</label>
+            <label htmlFor="search-audit-action">Advanced action filter</label>
             <input
               id="search-audit-action"
-              placeholder="e.g. POST /api/students"
+              placeholder="Optional, e.g. POST /api/students"
               value={action}
               onChange={(event) => {
                 setAction(event.target.value)
@@ -229,10 +293,10 @@ function AuditLogsPage({ authToken }: AuditLogsPageProps) {
             />
           </div>
           <div className="search-wrap">
-            <label htmlFor="search-audit-path">Search path</label>
+            <label htmlFor="search-audit-path">Advanced path filter</label>
             <input
               id="search-audit-path"
-              placeholder="e.g. /api/notifications"
+              placeholder="Optional, e.g. /api/students"
               value={path}
               onChange={(event) => {
                 setPath(event.target.value)
@@ -240,7 +304,15 @@ function AuditLogsPage({ authToken }: AuditLogsPageProps) {
               }}
             />
           </div>
+          <div className="actions" style={{ marginTop: 0 }}>
+            <button type="button" className="secondary" onClick={resetFilters}>
+              Clear Filters
+            </button>
+          </div>
         </div>
+        <p style={{ margin: '0.5rem 0 0 0' }}>
+          Action and Path are optional filters. Leave them blank to see all logs.
+        </p>
       </section>
 
       <section className="panel">

@@ -122,11 +122,11 @@ if (!isProduction) {
 
 app.use('/api', apiLimiter)
 app.use((req, res, next) => {
-  if (shouldAuditRequest(req)) {
-    res.on('finish', () => {
+  res.on('finish', () => {
+    if (shouldAuditRequest(req)) {
       void logAuditForRequest(req, res)
-    })
-  }
+    }
+  })
   next()
 })
 
