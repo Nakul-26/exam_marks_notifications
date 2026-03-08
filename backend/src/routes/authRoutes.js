@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import { Router } from 'express'
 import Admin from '../models/Admin.js'
 import AuditLog from '../models/AuditLog.js'
@@ -30,7 +31,12 @@ const refreshCookieName =
   (typeof process.env.REFRESH_TOKEN_COOKIE_NAME === 'string'
     ? process.env.REFRESH_TOKEN_COOKIE_NAME.trim()
     : '') || 'refreshToken'
+const csrfCookieName =
+  (typeof process.env.CSRF_COOKIE_NAME === 'string'
+    ? process.env.CSRF_COOKIE_NAME.trim()
+    : '') || 'csrfToken'
 const refreshCookiePath = '/api/auth'
+const csrfCookiePath = '/'
 const refreshCookieMaxAgeMs = getRefreshTokenTtlSeconds() * 1000
 const nodeEnv = (process.env.NODE_ENV || 'development').trim().toLowerCase()
 const isProduction = nodeEnv === 'production'
@@ -68,6 +74,29 @@ const getRefreshTokenFromRequest = (req) => {
     return fromCookie
   }
   return asTrimmedString(req.body?.refreshToken)
+}
+
+const getCsrfTokenFromRequest = (req) => {
+  const cookies = parseCookieHeader(req.headers.cookie)
+  return {
+    csrfFromCookie: asTrimmedString(cookies[csrfCookieName]),
+    csrfFromHeader: asTrimmedString(req.get('x-csrf-token')),
+  }
+}
+
+const isValidCsrfToken = (req) => {
+  const { csrfFromCookie, csrfFromHeader } = getCsrfTokenFromRequest(req)
+  if (!csrfFromCookie || !csrfFromHeader) {
+    return false
+  }
+
+  const csrfFromCookieBuffer = Buffer.from(csrfFromCookie)
+  const csrfFromHeaderBuffer = Buffer.from(csrfFromHeader)
+  if (csrfFromCookieBuffer.length !== csrfFromHeaderBuffer.length) {
+    return false
+  }
+
+  return crypto.timingSafeEqual(csrfFromCookieBuffer, csrfFromHeaderBuffer)
 }
 
 const getBearerToken = (authorizationHeader) => {
@@ -138,12 +167,31 @@ const setRefreshTokenCookie = (res, refreshToken) => {
   })
 }
 
+const setCsrfTokenCookie = (res, csrfToken) => {
+  res.cookie(csrfCookieName, csrfToken, {
+    httpOnly: false,
+    secure: isProduction,
+    sameSite: isProduction ? 'strict' : 'lax',
+    maxAge: refreshCookieMaxAgeMs,
+    path: csrfCookiePath,
+  })
+}
+
 const clearRefreshTokenCookie = (res) => {
   res.clearCookie(refreshCookieName, {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? 'strict' : 'lax',
     path: refreshCookiePath,
+  })
+}
+
+const clearCsrfTokenCookie = (res) => {
+  res.clearCookie(csrfCookieName, {
+    httpOnly: false,
+    secure: isProduction,
+    sameSite: isProduction ? 'strict' : 'lax',
+    path: csrfCookiePath,
   })
 }
 
@@ -158,6 +206,7 @@ const issueSessionTokens = async ({ role, user, req, res }) => {
   const accessToken = signToken(payload)
   const refreshToken = generateOpaqueToken()
   const refreshTokenHash = hashOpaqueToken(refreshToken)
+  const csrfToken = generateOpaqueToken()
 
   await RefreshToken.create({
     collegeId: user.collegeId,
@@ -170,6 +219,7 @@ const issueSessionTokens = async ({ role, user, req, res }) => {
   })
 
   setRefreshTokenCookie(res, refreshToken)
+  setCsrfTokenCookie(res, csrfToken)
 
   return {
     token: accessToken,
@@ -203,6 +253,7 @@ const rotateRefreshToken = async ({ existingRefreshToken, req, res }) => {
 
   const newRefreshToken = generateOpaqueToken()
   const newRefreshTokenHash = hashOpaqueToken(newRefreshToken)
+  const newCsrfToken = generateOpaqueToken()
 
   await RefreshToken.create({
     collegeId: safeUser.collegeId,
@@ -231,6 +282,7 @@ const rotateRefreshToken = async ({ existingRefreshToken, req, res }) => {
   }
 
   setRefreshTokenCookie(res, newRefreshToken)
+  setCsrfTokenCookie(res, newCsrfToken)
 
   const accessToken = signToken({
     id: safeUser._id,
@@ -383,13 +435,19 @@ router.post('/login', async (req, res) => {
     }
 
     return res.status(401).json({ message: 'Invalid email or password' })
-  } catch (_error) {
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to login', error)
     return res.status(500).json({ message: 'Failed to login' })
   }
 })
 
 router.post('/refresh', async (req, res) => {
   try {
+    if (!isValidCsrfToken(req)) {
+      return res.status(403).json({ message: 'CSRF validation failed' })
+    }
+
     const refreshToken = getRefreshTokenFromRequest(req)
     if (!refreshToken) {
       return res.status(401).json({ message: 'Refresh token is required' })
@@ -400,6 +458,7 @@ router.post('/refresh', async (req, res) => {
 
     if (!existingRefreshToken) {
       clearRefreshTokenCookie(res)
+      clearCsrfTokenCookie(res)
       return res.status(401).json({ message: 'Invalid refresh token' })
     }
 
@@ -421,12 +480,14 @@ router.post('/refresh', async (req, res) => {
         },
       )
       clearRefreshTokenCookie(res)
+      clearCsrfTokenCookie(res)
       return res.status(401).json({ message: 'Refresh token is invalid' })
     }
 
     const session = await rotateRefreshToken({ existingRefreshToken, req, res })
     if (!session) {
       clearRefreshTokenCookie(res)
+      clearCsrfTokenCookie(res)
       return res.status(401).json({ message: 'Session refresh failed' })
     }
 
@@ -438,6 +499,10 @@ router.post('/refresh', async (req, res) => {
 
 router.post('/logout', async (req, res) => {
   try {
+    if (!isValidCsrfToken(req)) {
+      return res.status(403).json({ message: 'CSRF validation failed' })
+    }
+
     const refreshToken = getRefreshTokenFromRequest(req)
     if (refreshToken) {
       await RefreshToken.updateOne(
@@ -469,6 +534,7 @@ router.post('/logout', async (req, res) => {
     }
 
     clearRefreshTokenCookie(res)
+    clearCsrfTokenCookie(res)
     return res.json({ message: 'Logged out successfully' })
   } catch (_error) {
     return res.status(500).json({ message: 'Failed to logout' })

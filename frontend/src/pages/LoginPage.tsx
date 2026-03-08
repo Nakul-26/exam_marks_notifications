@@ -14,6 +14,29 @@ type LoginPageProps = {
 
 const authApiPath = '/api/auth/login'
 
+const parseResponsePayload = async (response: Response) => {
+  const contentType = (response.headers.get('content-type') || '').toLowerCase()
+
+  if (contentType.includes('application/json')) {
+    try {
+      return await response.json()
+    } catch {
+      return {}
+    }
+  }
+
+  const text = await response.text().catch(() => '')
+  if (!text) {
+    return {}
+  }
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { message: text }
+  }
+}
+
 function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -33,14 +56,22 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
         credentials: 'include',
         body: JSON.stringify({ email: email.trim(), password }),
       })
-      const payload = await response.json()
+      const payload = await parseResponsePayload(response)
       if (!response.ok) {
-        throw new Error(payload.message || 'Login failed')
+        throw new Error(payload?.message || 'Login failed')
       }
 
+      if (!payload?.data?.user) {
+        throw new Error('Invalid login response from server')
+      }
       onLoginSuccess(payload.data)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unexpected error'
+      const message =
+        err instanceof TypeError
+          ? 'Unable to reach server. Please confirm backend is running on port 5000.'
+          : err instanceof Error
+            ? err.message
+            : 'Unexpected error'
       setError(message)
     } finally {
       setLoading(false)

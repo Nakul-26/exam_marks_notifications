@@ -229,8 +229,25 @@ const studentExcelTemplateHeaders = [
 const teacherExcelTemplateHeaders = ['name', 'email', 'phone', 'password']
 const classExcelTemplateHeaders = ['className', 'section']
 const classKeySeparator = '__'
-const authTokenStorageKey = 'authToken'
-const authUserStorageKey = 'authUser'
+const csrfCookieName = 'csrfToken'
+
+const getCookieValue = (cookieName: string): string => {
+  if (typeof document === 'undefined') {
+    return ''
+  }
+
+  const cookiePrefix = `${cookieName}=`
+  const cookie = document.cookie
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(cookiePrefix))
+
+  if (!cookie) {
+    return ''
+  }
+
+  return decodeURIComponent(cookie.slice(cookiePrefix.length))
+}
 
 const getClassKey = (classId: string, sectionId: string): string =>
   `${classId}${classKeySeparator}${sectionId}`
@@ -989,23 +1006,25 @@ function App() {
     const applySession = (token: string, user: AuthUser) => {
       setAuthToken(token)
       setAuthUser(user)
-      localStorage.setItem(authTokenStorageKey, token)
-      localStorage.setItem(authUserStorageKey, JSON.stringify(user))
       if (user.role === 'teacher') {
         setActivePage('marks')
       }
     }
 
     const clearSession = () => {
-      localStorage.removeItem(authTokenStorageKey)
-      localStorage.removeItem(authUserStorageKey)
       setAuthToken('')
       setAuthUser(null)
     }
 
     const tryRefreshSession = async () => {
+      const csrfToken = getCookieValue(csrfCookieName)
+      if (!csrfToken) {
+        return false
+      }
+
       const response = await fetch('/api/auth/refresh', {
         method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken },
         credentials: 'include',
       })
       const payload = await response.json().catch(() => ({}))
@@ -1022,21 +1041,7 @@ function App() {
     }
 
     const restoreSession = async () => {
-      const savedToken = localStorage.getItem(authTokenStorageKey) || ''
-      const savedUserRaw = localStorage.getItem(authUserStorageKey)
-
       try {
-        if (savedToken && savedUserRaw) {
-          const response = await fetch('/api/auth/me', {
-            headers: { Authorization: `Bearer ${savedToken}` },
-          })
-          const payload = await response.json()
-          if (response.ok && payload?.data?.id && payload?.data?.role) {
-            applySession(savedToken, payload.data as AuthUser)
-            return
-          }
-        }
-
         const refreshed = await tryRefreshSession()
         if (!refreshed) {
           clearSession()
@@ -2403,8 +2408,6 @@ function App() {
     }
     setAuthToken(nextToken)
     setAuthUser(payload.user)
-    localStorage.setItem(authTokenStorageKey, nextToken)
-    localStorage.setItem(authUserStorageKey, JSON.stringify(payload.user))
     setError('')
     setActivePage(payload.user.role === 'teacher' ? 'marks' : 'students')
   }
@@ -2414,7 +2417,10 @@ function App() {
       try {
         await fetch('/api/auth/logout', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${authToken}` },
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'X-CSRF-Token': getCookieValue(csrfCookieName),
+          },
           credentials: 'include',
         })
       } catch (_error) {
@@ -2423,8 +2429,6 @@ function App() {
     }
     setAuthToken('')
     setAuthUser(null)
-    localStorage.removeItem(authTokenStorageKey)
-    localStorage.removeItem(authUserStorageKey)
     setError('')
   }
 
