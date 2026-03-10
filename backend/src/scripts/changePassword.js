@@ -3,6 +3,7 @@ import mongoose from 'mongoose'
 import Admin from '../models/Admin.js'
 import Teacher from '../models/Teacher.js'
 import { hashPassword } from '../utils/auth.js'
+import { getMongoConnectionConfig } from '../utils/db.js'
 import { getDefaultCollegeId } from '../utils/tenant.js'
 
 dotenv.config()
@@ -56,12 +57,8 @@ const start = async () => {
     return
   }
 
-  const mongoUri = asTrimmedString(process.env.MONGO_URI)
-  if (!mongoUri) {
-    throw new Error('MONGO_URI is required')
-  }
-
-  await mongoose.connect(mongoUri)
+  const { mongoUri, mongoOptions } = getMongoConnectionConfig()
+  await mongoose.connect(mongoUri, mongoOptions)
 
   const filter = id ? { _id: id, collegeId } : { email, collegeId }
   const findUser = async () => {

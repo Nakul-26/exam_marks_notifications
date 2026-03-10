@@ -19,12 +19,12 @@ import subjectRoutes from './routes/subjectRoutes.js'
 import teacherRoutes from './routes/teacherRoutes.js'
 import teacherSubjectRoutes from './routes/teacherSubjectRoutes.js'
 import { logAuditForRequest, shouldAuditRequest } from './utils/auditLog.js'
+import { getMongoConnectionConfig } from './utils/db.js'
 
 dotenv.config()
 
 const app = express()
 const port = process.env.PORT || 5000
-const mongoUri = process.env.MONGO_URI
 const jwtSecret = process.env.JWT_SECRET
 const nodeEnv = (process.env.NODE_ENV || 'development').trim().toLowerCase()
 const isProduction = nodeEnv === 'production'
@@ -162,9 +162,6 @@ app.use((error, _req, res, _next) => {
 })
 
 const start = async () => {
-  if (!mongoUri) {
-    throw new Error('MONGO_URI is required')
-  }
   if (!jwtSecret) {
     throw new Error('JWT_SECRET is required')
   }
@@ -172,7 +169,9 @@ const start = async () => {
     throw new Error('CORS_ORIGINS is required in production')
   }
 
-  await mongoose.connect(mongoUri)
+  const { mongoUri, mongoOptions } = getMongoConnectionConfig()
+
+  await mongoose.connect(mongoUri, mongoOptions)
   app.listen(port, () => {
     // eslint-disable-next-line no-console
     console.log(`Server running on http://localhost:${port}`)

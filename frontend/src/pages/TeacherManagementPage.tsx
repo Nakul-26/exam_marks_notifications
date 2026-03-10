@@ -29,6 +29,7 @@ type TeacherManagementPageProps = {
   handleTeacherPasswordReset: (id: string, password: string) => Promise<void>
   teacherBulkSubmitting: boolean
   downloadTeacherExcelTemplate: () => void
+  exportTeachersToExcel: () => void
   uploadTeacherExcelSheet: (file: File) => Promise<void>
 }
 
@@ -49,6 +50,7 @@ function TeacherManagementPage({
   handleTeacherPasswordReset,
   teacherBulkSubmitting,
   downloadTeacherExcelTemplate,
+  exportTeachersToExcel,
   uploadTeacherExcelSheet,
 }: TeacherManagementPageProps) {
   const teacherUploadInputRef = useRef<HTMLInputElement | null>(null)
@@ -135,6 +137,13 @@ function TeacherManagementPage({
               disabled={teacherBulkSubmitting}
             >
               {teacherBulkSubmitting ? 'Uploading...' : 'Upload Filled Excel'}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={exportTeachersToExcel}
+            >
+              Export Teachers Excel
             </button>
             <input
               ref={teacherUploadInputRef}

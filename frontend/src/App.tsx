@@ -226,6 +226,7 @@ const studentExcelTemplateHeaders = [
   'studentPhone',
   'fatherPhone',
 ]
+const subjectExcelTemplateHeaders = ['name']
 const teacherExcelTemplateHeaders = ['name', 'email', 'phone', 'password']
 const classExcelTemplateHeaders = ['className', 'section']
 const classKeySeparator = '__'
@@ -520,6 +521,7 @@ function App() {
   const [subjectSearch, setSubjectSearch] = useState('')
   const [subjectLoading, setSubjectLoading] = useState(false)
   const [subjectSubmitting, setSubjectSubmitting] = useState(false)
+  const [subjectBulkSubmitting, setSubjectBulkSubmitting] = useState(false)
 
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [teacherForm, setTeacherForm] = useState<TeacherFormState>(
@@ -609,6 +611,10 @@ function App() {
     [editingClassStudentId],
   )
   const isEditingClass = useMemo(() => Boolean(editingClassId), [editingClassId])
+
+  useEffect(() => {
+    setError('')
+  }, [activePage])
 
   const filteredStudents = useMemo(() => {
     const normalizedSearch = studentSearch.trim().toLowerCase()
@@ -1230,6 +1236,310 @@ function App() {
     const workbook = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(workbook, worksheet, 'StudentsTemplate')
     XLSX.writeFile(workbook, 'students_template.xlsx')
+  }
+
+  const exportStudentsToExcel = () => {
+    const studentsToExport = filteredStudents.map((student) => ({
+      name: student.name,
+      rollNo: student.rollNo,
+      fatherName: student.fatherName,
+      studentPhone: student.studentPhone,
+      fatherPhone: student.fatherPhone,
+    }))
+
+    if (!studentsToExport.length) {
+      setError('No students available to export')
+      return
+    }
+
+    setError('')
+    const worksheet = XLSX.utils.json_to_sheet(studentsToExport, {
+      header: studentExcelTemplateHeaders,
+    })
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Students')
+    const fileName = studentSearch.trim()
+      ? 'students_filtered_export.xlsx'
+      : 'students_export.xlsx'
+    XLSX.writeFile(workbook, fileName)
+  }
+
+  const exportExamsToExcel = () => {
+    const examsToExport = filteredExams.map((exam) => {
+      const examClasses = (exam.examClasses || []).length
+        ? (exam.examClasses || [])
+            .map((examClass) => `${examClass.classId} - ${examClass.sectionId}`)
+            .join(', ')
+        : `${exam.classId} - ${exam.sectionId}`
+
+      return {
+        examName: exam.examName,
+        classSections: examClasses,
+        academicYear: exam.academicYear,
+        status: exam.status,
+        description: exam.description,
+        subjectCount: examSubjectCountByExam[exam._id] || 0,
+        createdAt: exam.createdAt ? new Date(exam.createdAt).toLocaleString() : '',
+      }
+    })
+
+    if (!examsToExport.length) {
+      setError('No exams available to export')
+      return
+    }
+
+    setError('')
+    const worksheet = XLSX.utils.json_to_sheet(examsToExport, {
+      header: [
+        'examName',
+        'classSections',
+        'academicYear',
+        'status',
+        'description',
+        'subjectCount',
+        'createdAt',
+      ],
+    })
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Exams')
+    const hasActiveExamFilter =
+      Boolean(examSearch.trim()) ||
+      Boolean(examFilterClassKey) ||
+      Boolean(examFilterYear) ||
+      Boolean(examFilterStatus)
+    const fileName = hasActiveExamFilter
+      ? 'exams_filtered_export.xlsx'
+      : 'exams_export.xlsx'
+    XLSX.writeFile(workbook, fileName)
+  }
+
+  const exportTeachersToExcel = () => {
+    const teachersToExport = filteredTeachers.map((teacher) => ({
+      name: teacher.name,
+      email: teacher.email,
+      phone: teacher.phone,
+    }))
+
+    if (!teachersToExport.length) {
+      setError('No teachers available to export')
+      return
+    }
+
+    setError('')
+    const worksheet = XLSX.utils.json_to_sheet(teachersToExport, {
+      header: ['name', 'email', 'phone'],
+    })
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Teachers')
+    const fileName = teacherSearch.trim()
+      ? 'teachers_filtered_export.xlsx'
+      : 'teachers_export.xlsx'
+    XLSX.writeFile(workbook, fileName)
+  }
+
+  const exportClassesToExcel = () => {
+    const classesToExport = filteredClasses.map((classRecord) => ({
+      className: classRecord.className,
+      section: classRecord.section,
+    }))
+
+    if (!classesToExport.length) {
+      setError('No classes available to export')
+      return
+    }
+
+    setError('')
+    const worksheet = XLSX.utils.json_to_sheet(classesToExport, {
+      header: classExcelTemplateHeaders,
+    })
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Classes')
+    const fileName = classSearch.trim()
+      ? 'classes_filtered_export.xlsx'
+      : 'classes_export.xlsx'
+    XLSX.writeFile(workbook, fileName)
+  }
+
+  const downloadSubjectExcelTemplate = () => {
+    const worksheet = XLSX.utils.aoa_to_sheet([subjectExcelTemplateHeaders])
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'SubjectsTemplate')
+    XLSX.writeFile(workbook, 'subjects_template.xlsx')
+  }
+
+  const exportSubjectsToExcel = () => {
+    const subjectsToExport = filteredSubjects.map((subject) => ({
+      name: subject.name,
+    }))
+
+    if (!subjectsToExport.length) {
+      setError('No subjects available to export')
+      return
+    }
+
+    setError('')
+    const worksheet = XLSX.utils.json_to_sheet(subjectsToExport, {
+      header: subjectExcelTemplateHeaders,
+    })
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Subjects')
+    const fileName = subjectSearch.trim()
+      ? 'subjects_filtered_export.xlsx'
+      : 'subjects_export.xlsx'
+    XLSX.writeFile(workbook, fileName)
+  }
+
+  const uploadSubjectExcelSheet = async (file: File) => {
+    try {
+      setSubjectBulkSubmitting(true)
+      setError('')
+
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer, { type: 'array' })
+      const firstSheetName = workbook.SheetNames[0]
+      if (!firstSheetName) {
+        throw new Error('Uploaded file has no sheet')
+      }
+
+      const worksheet = workbook.Sheets[firstSheetName]
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+        defval: '',
+      })
+      if (!rows.length) {
+        throw new Error('Uploaded sheet has no data rows')
+      }
+
+      const headers = Object.keys(rows[0] || {})
+      const hasRequiredHeaders = subjectExcelTemplateHeaders.every((header) =>
+        headers.includes(header),
+      )
+      if (!hasRequiredHeaders) {
+        throw new Error('Invalid headers. Required columns: name')
+      }
+
+      const existingByName = new Map(
+        subjects.map((subject) => [subject.name.trim().toLowerCase(), subject]),
+      )
+      const seenNames = new Set<string>()
+
+      const normalizedRows = rows
+        .map((row, index) => {
+          const normalized = normalizeSubjectForm({
+            name: String(row.name || ''),
+          })
+          return { rowNo: index + 2, normalized }
+        })
+        .filter(({ normalized }) => Object.values(normalized).some((value) => value.trim() !== ''))
+
+      if (!normalizedRows.length) {
+        throw new Error('No valid rows found to upload')
+      }
+
+      const failedRows: Array<{
+        rowNo: number
+        subjectName: string
+        reason: string
+      }> = []
+      const validRows: Array<{ rowNo: number; normalized: SubjectFormState }> = []
+
+      for (const { rowNo, normalized } of normalizedRows) {
+        const validationError = validateSubjectForm(normalized)
+        if (validationError) {
+          failedRows.push({
+            rowNo,
+            subjectName: normalized.name,
+            reason: validationError,
+          })
+          continue
+        }
+
+        const normalizedName = normalized.name.toLowerCase()
+        if (seenNames.has(normalizedName)) {
+          failedRows.push({
+            rowNo,
+            subjectName: normalized.name,
+            reason: `Duplicate subject "${normalized.name}" in upload file`,
+          })
+          continue
+        }
+
+        seenNames.add(normalizedName)
+        validRows.push({ rowNo, normalized })
+      }
+
+      const saveResults = await Promise.all(
+        validRows.map(async ({ rowNo, normalized }) => {
+          const existingSubject = existingByName.get(normalized.name.toLowerCase())
+          const method = existingSubject ? 'PUT' : 'POST'
+          const url = existingSubject
+            ? `${subjectApiPath}/${existingSubject._id}`
+            : subjectApiPath
+
+          try {
+            const response = await fetch(url, {
+              method,
+              headers: { 'Content-Type': 'application/json', ...authHeader },
+              body: JSON.stringify(normalized),
+            })
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok) {
+              const message =
+                typeof payload?.message === 'string'
+                  ? payload.message
+                  : `Failed to save subject ${normalized.name}`
+              return {
+                ok: false as const,
+                rowNo,
+                subjectName: normalized.name,
+                reason: message,
+              }
+            }
+
+            return { ok: true as const }
+          } catch (_error) {
+            return {
+              ok: false as const,
+              rowNo,
+              subjectName: normalized.name,
+              reason: 'Network or server error while saving row',
+            }
+          }
+        }),
+      )
+
+      const failedSaveRows = saveResults.filter((result) => !result.ok)
+      failedRows.push(...failedSaveRows)
+
+      const totalRows = normalizedRows.length
+      const failedCount = failedRows.length
+      const successCount = totalRows - failedCount
+
+      if (successCount > 0) {
+        await loadSubjects()
+      }
+
+      if (failedCount > 0) {
+        const failedSubjectList = failedRows
+          .map((row) => row.subjectName || 'N/A')
+          .join(' | ')
+
+        if (failedCount === totalRows) {
+          setError(
+            `Complete failure: all ${totalRows} subjects failed. Failed rows (Subject): ${failedSubjectList}`,
+          )
+          return
+        }
+
+        setError(
+          `Partial failure: ${failedCount} of ${totalRows} subjects failed. Failed rows (Subject): ${failedSubjectList}`,
+        )
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+    } finally {
+      setSubjectBulkSubmitting(false)
+    }
   }
 
   const uploadStudentExcelSheet = async (file: File) => {
@@ -2641,6 +2951,13 @@ function App() {
                 >
                   {studentBulkSubmitting ? 'Uploading...' : 'Upload Filled Excel'}
                 </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={exportStudentsToExcel}
+                >
+                  Export Students Excel
+                </button>
                 <input
                   ref={studentUploadInputRef}
                   type="file"
@@ -2808,6 +3125,15 @@ function App() {
               <div className="stat-card">
                 <span>Total Exams</span>
                 <strong>{exams.length}</strong>
+              </div>
+              <div className="actions" style={{ marginTop: 0 }}>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={exportExamsToExcel}
+                >
+                  Export Exams Excel
+                </button>
               </div>
               <div className="search-wrap">
                 <label htmlFor="search-exams">Search exams</label>
@@ -3258,6 +3584,10 @@ function App() {
           filteredSubjects={filteredSubjects}
           startSubjectEdit={startSubjectEdit}
           handleSubjectDelete={handleSubjectDelete}
+          subjectBulkSubmitting={subjectBulkSubmitting}
+          downloadSubjectExcelTemplate={downloadSubjectExcelTemplate}
+          exportSubjectsToExcel={exportSubjectsToExcel}
+          uploadSubjectExcelSheet={uploadSubjectExcelSheet}
         />
       ) : activePage === 'teachers' ? (
         <TeacherManagementPage
@@ -3277,6 +3607,7 @@ function App() {
           handleTeacherPasswordReset={handleTeacherPasswordReset}
           teacherBulkSubmitting={teacherBulkSubmitting}
           downloadTeacherExcelTemplate={downloadTeacherExcelTemplate}
+          exportTeachersToExcel={exportTeachersToExcel}
           uploadTeacherExcelSheet={uploadTeacherExcelSheet}
         />
       ) : activePage === 'teacherSubjects' ? (
@@ -3371,6 +3702,13 @@ function App() {
                   disabled={classBulkSubmitting}
                 >
                   {classBulkSubmitting ? 'Uploading...' : 'Upload Filled Excel'}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={exportClassesToExcel}
+                >
+                  Export Classes Excel
                 </button>
                 <input
                   ref={classUploadInputRef}

@@ -642,6 +642,45 @@ function MarksManagementPage({ exams, classStudents, authToken }: MarksManagemen
     }
   }
 
+  const exportMarksToExcel = () => {
+    const marksToExport = filteredMarks.map((mark) => ({
+      examName: selectedExam?.examName || '',
+      academicYear: selectedExam?.academicYear || '',
+      studentName: mark.studentName,
+      studentRollNo: mark.studentRollNo,
+      subjectId: mark.subjectId,
+      marksObtained: mark.marksObtained,
+      totalMarks: mark.totalMarks ?? '',
+      passingMarks: mark.passingMarks ?? '',
+      remarks: mark.remarks || '',
+    }))
+
+    if (!marksToExport.length) {
+      setError('No marks available to export')
+      return
+    }
+
+    setError('')
+    const worksheet = XLSX.utils.json_to_sheet(marksToExport, {
+      header: [
+        'examName',
+        'academicYear',
+        'studentName',
+        'studentRollNo',
+        'subjectId',
+        'marksObtained',
+        'totalMarks',
+        'passingMarks',
+        'remarks',
+      ],
+    })
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Marks')
+    const hasActiveFilter = Boolean(subjectFilterId) || Boolean(markSearch.trim())
+    const fileName = hasActiveFilter ? 'marks_filtered_export.xlsx' : 'marks_export.xlsx'
+    XLSX.writeFile(workbook, fileName)
+  }
+
   return (
     <>
       {error ? <p className="error">{error}</p> : null}
@@ -936,6 +975,16 @@ function MarksManagementPage({ exams, classStudents, authToken }: MarksManagemen
               ))}
             </select>
           </label>
+          <div className="actions" style={{ marginTop: 0 }}>
+            <button
+              type="button"
+              className="secondary"
+              onClick={exportMarksToExcel}
+              disabled={!filteredMarks.length}
+            >
+              Export Marks Excel
+            </button>
+          </div>
           {(loading || subjectLoading) && <p>Loading...</p>}
         </div>
         <div className="table-wrap">

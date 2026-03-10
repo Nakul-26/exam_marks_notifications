@@ -2,6 +2,7 @@ import dotenv from 'dotenv'
 import mongoose from 'mongoose'
 import Admin from '../models/Admin.js'
 import { hashPassword } from '../utils/auth.js'
+import { getMongoConnectionConfig } from '../utils/db.js'
 import { getDefaultCollegeId } from '../utils/tenant.js'
 
 dotenv.config()
@@ -23,11 +24,6 @@ const printUsage = () => {
 }
 
 const start = async () => {
-  const mongoUri = asTrimmedString(process.env.MONGO_URI)
-  if (!mongoUri) {
-    throw new Error('MONGO_URI is required')
-  }
-
   const name = readArgValue('--name')
   const email = readArgValue('--email').toLowerCase()
   const password = readArgValue('--password')
@@ -39,7 +35,8 @@ const start = async () => {
     return
   }
 
-  await mongoose.connect(mongoUri)
+  const { mongoUri, mongoOptions } = getMongoConnectionConfig()
+  await mongoose.connect(mongoUri, mongoOptions)
 
   const existing = await Admin.findOne({ email, collegeId }).lean()
   if (existing) {

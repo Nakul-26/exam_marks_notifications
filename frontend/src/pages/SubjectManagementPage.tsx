@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
 
 type Subject = {
@@ -21,6 +22,10 @@ type SubjectManagementPageProps = {
   filteredSubjects: Subject[]
   startSubjectEdit: (subject: Subject) => void
   handleSubjectDelete: (id: string) => Promise<void>
+  subjectBulkSubmitting: boolean
+  downloadSubjectExcelTemplate: () => void
+  exportSubjectsToExcel: () => void
+  uploadSubjectExcelSheet: (file: File) => Promise<void>
 }
 
 function SubjectManagementPage({
@@ -37,7 +42,13 @@ function SubjectManagementPage({
   filteredSubjects,
   startSubjectEdit,
   handleSubjectDelete,
+  subjectBulkSubmitting,
+  downloadSubjectExcelTemplate,
+  exportSubjectsToExcel,
+  uploadSubjectExcelSheet,
 }: SubjectManagementPageProps) {
+  const subjectUploadInputRef = useRef<HTMLInputElement | null>(null)
+
   return (
     <>
       <section className="panel panel-compact">
@@ -45,6 +56,43 @@ function SubjectManagementPage({
           <div className="stat-card">
             <span>Total Subjects</span>
             <strong>{subjects.length}</strong>
+          </div>
+          <div className="actions" style={{ marginTop: 0 }}>
+            <button
+              type="button"
+              className="secondary"
+              onClick={downloadSubjectExcelTemplate}
+            >
+              Download Empty Excel
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => subjectUploadInputRef.current?.click()}
+              disabled={subjectBulkSubmitting}
+            >
+              {subjectBulkSubmitting ? 'Uploading...' : 'Upload Filled Excel'}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={exportSubjectsToExcel}
+            >
+              Export Subjects Excel
+            </button>
+            <input
+              ref={subjectUploadInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              style={{ display: 'none' }}
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) {
+                  void uploadSubjectExcelSheet(file)
+                }
+                event.target.value = ''
+              }}
+            />
           </div>
           <div className="search-wrap">
             <label htmlFor="search-subjects">Search subjects</label>
